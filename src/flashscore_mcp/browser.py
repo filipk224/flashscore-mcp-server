@@ -1,11 +1,17 @@
+"""Playwright browser manager - production ready with rate limiting, retries, multi-selector support for auto-adapt."""
+
 from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, List, Optional
+
 from loguru import logger
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.async_api import async_playwright, Browser, Page, Locator
 from tenacity import retry, stop_after_attempt, wait_exponential
+
 from .config import settings
+
 
 class BrowserManager:
     def __init__(self) -> None:
@@ -21,8 +27,11 @@ class BrowserManager:
             if self._browser is not None:
                 return
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(headless=settings.headless, args=settings.browser_args)
-            logger.info("Browser started")
+            self._browser = await self._playwright.chromium.launch(
+                headless=settings.headless,
+                args=settings.browser_args,
+            )
+            logger.info("Browser started (headless={})", settings.headless)
 
     async def stop(self) -> None:
         if self._browser:
@@ -31,21 +40,57 @@ class BrowserManager:
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
+        logger.info("Browser stopped")
 
     @asynccontextmanager
     async def new_page(self) -> AsyncIterator[Page]:
         await self.start()
         async with self._semaphore:
-            context = await self._browser.new_context(user_agent=settings.user_agent, viewport={"width": 1280, "height": 800})
+            context = await self._browser.new_context(
+                user_agent=settings.user_agent,
+                viewport={"width": 1366, "height": 900},
+                locale="en-US",
+            )
             page = await context.new_page()
             try:
                 yield page
             finally:
                 await context.close()
 
+
 browser_manager = BrowserManager()
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
 async def safe_goto(page: Page, url: str, **kwargs) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=settings.nav_timeout_ms, **kwargs)
+    await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(settings.min_delay_s)
+
+
+async def find_first(page: Page, selectors: List[str], timeout: int = 5000) -> Optional[Locator]:
+    """Try multiple selectors in order for auto-adapt to slight site changes. Logs which one worked."""
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible(timeout=timeout):
+                logger.debug("Selector matched: {}", sel)
+                return loc
+        except Exception:
+            continue
+    logger.warning("No selector matched from list: {}", selectors[:3])
+    return None
+
+
+async def find_all(page: Page, selectors: List[str], timeout: int = 3000) -> List[Locator]:
+    """Return all matching from first successful selector family."""
+    for sel in selectors:
+        try:
+            locs = page.locator(sel)
+            count = await locs.count()
+            if count > 0:
+                logger.debug("Found {} elements with {}", count, sel)
+                return [locs.nth(i) for i in range(count)]
+        except Exception:
+            continue
+    return []
