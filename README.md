@@ -1,33 +1,35 @@
-# Flashscore MCP Server (Private Production / IaaS)
+# Flashscore MCP Server (Private Production)
 
-Private production-ready MCP server for www.flashscore.com sports data.
+Private production MCP for www.flashscore.com.
 
-## Key Features
-- **Auto-adapts** to slight site changes via multi-fallback selectors (config.py)
-- Real extractors for discovery (top menu sports, left menu countries/leagues)
-- Standings, results history (PF/PA mode + show-more), fixtures, news, archives
-- Caching, rate limiting, retries, logging
-- **IaaS ready**: Docker, healthcheck, env config, concurrent controls
+## Highlights
+- Auto-adapts to slight site changes (multi-fallback selectors in config.py)
+- **Permanent / long-TTL cache of historical game results** (date + home/away teams + PF/PA). Only newer games are fetched on subsequent calls → huge savings on Apify & cloud.
+- Real discovery + standings/results/fixtures/news/archive extractors
+- Hosted on **Apify**, any cloud IaaS, and locally
 
-## Quick Start (Local)
+## What get_results_history returns
+Exactly: list of games with  
+`date`, `home_team`, `away_team`, `home_pf`, `away_pf`
+
+## Caching Policy (Results)
+- Past completed games never change → cached permanently (or TTL 30–90+ days)
+- First call: full history (with show-more)
+- Later calls: pass `since="auto"` or omit → only newer games scraped and appended to cache
+- Cache files live in `data/results_*.json`
+
+## Quick Start
 ```bash
-uv sync
-playwright install chromium
+uv sync && playwright install chromium
 uv run flashscore-mcp
 ```
 
-## IaaS Hosting (Railway / Fly / DO / AWS etc.)
-1. Use the Dockerfile
-2. Set env vars from `.env.example`
-3. For HTTP/SSE transport (recommended for hosted), extend server.py with `mcp.run_sse_async()` or platform-specific
-4. Scale concurrency carefully (browser RAM)
+## Hosting
+- **Local**: stdio
+- **Apify**: use Dockerfile as custom Actor base
+- **Cloud IaaS** (Railway, Fly, DO, AWS…): Dockerfile + healthcheck + env vars from .env.example
 
-## Config
-All selectors live in `src/flashscore_mcp/config.py` as lists of fallbacks.  
-Update the lists when Flashscore changes class names — the first working selector is used automatically.
-
-## Tools
-list_sports, list_countries, list_leagues, get_standings, get_results_history, get_upcoming_fixtures, get_news, list_archive_seasons + historical variants.
+See PRD.md for full requirements.
 
 ## License
 Proprietary – private production use only.

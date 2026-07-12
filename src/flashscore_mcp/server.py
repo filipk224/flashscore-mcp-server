@@ -1,4 +1,4 @@
-"""Production MCP server - IaaS ready (stdio + future HTTP/SSE)."""
+"""Production MCP server - IaaS + Apify ready, with results caching."""
 
 from __future__ import annotations
 import asyncio
@@ -10,7 +10,7 @@ from .extractors import discovery, standings, results, fixtures, news, archive
 
 mcp = FastMCP(
     "flashscore-mcp",
-    description="Private production Flashscore sports data MCP (adaptable extractors, IaaS ready)",
+    description="Private production Flashscore sports data MCP (adaptable, cached history, Apify/IaaS ready)",
 )
 
 
@@ -44,9 +44,19 @@ async def get_results_history(
     season: str = "current",
     mode: str = "full",
     limit: Optional[int] = None,
+    since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """Full results history. mode='minimal' for team+PF/PA only. Handles show-more."""
-    return await results.get_results_history(league, season, mode, limit)
+    """
+    Full game results history.
+
+    Returns games with: date, home_team, away_team, home_pf (points for home), away_pf (points for away).
+
+    Caching (history never changes):
+    - Past games are cached permanently / long-TTL.
+    - Use since="auto" (or omit after first run) to only fetch newer games and append to cache.
+    - Greatly reduces cost on Apify / cloud IaaS for repeated updates.
+    """
+    return await results.get_results_history(league, season, mode, limit, since)
 
 
 @mcp.tool()
@@ -78,8 +88,7 @@ async def get_historical_results(league: str, season: str, limit: Optional[int] 
 
 
 async def main() -> None:
-    logger.info("Starting private Flashscore MCP Server v{} (IaaS ready)", __import__("flashscore_mcp").__version__)
-    # For IaaS: can switch to mcp.run_sse_async() or similar for HTTP
+    logger.info("Starting private Flashscore MCP Server v{} (Apify + IaaS + local ready)", __import__("flashscore_mcp").__version__)
     await mcp.run_stdio_async()
 
 
