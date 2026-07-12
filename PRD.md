@@ -1,16 +1,12 @@
-# Flashscore MCP Server - Private Production PRD
+# Flashscore MCP Server - Private Production PRD (IaaS)
 
-**Version:** 0.1 | **Status:** Production Skeleton | **Private**
+**Version 0.1.1** | Adaptable extractors + IaaS hosting
 
-Private MCP server for Flashscore.com data via Playwright.
-
-**Key Requirements Met:**
-- Sports top menu, countries/leagues left menu
+- Sports via top menu, countries/leagues via left menu
 - On-demand league choice
-- News, results history, fixtures, standings (MP, W, L, PF, PA, Form), archives
-- Local + online hosted
-- Adaptable to site changes (modular)
+- News, full results (PF/PA), fixtures, standings (MP/W/L/PF/PA/Form), archives
+- Multi-fallback selectors for auto-adaptation to slight site changes
+- Hosted on IaaS (Docker, healthcheck, env config, concurrency limits)
+- Modular design for easy maintenance
 
-Tools: list_sports, list_countries, list_leagues, get_standings, get_results_history, get_upcoming_fixtures, get_news, list_archive_seasons + historical variants.
-
-Architecture: FastMCP + Playwright BrowserManager + modular extractors + Pydantic.
+Tools and architecture as implemented.

@@ -1,4 +1,4 @@
-"""Playwright browser manager - production ready with rate limiting, retries, multi-selector support for auto-adapt."""
+"""Production BrowserManager - resilient, rate-limited, IaaS friendly."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class BrowserManager:
                 headless=settings.headless,
                 args=settings.browser_args,
             )
-            logger.info("Browser started (headless={})", settings.headless)
+            logger.info("Browser started (headless={}, concurrent={})", settings.headless, settings.max_concurrent_pages)
 
     async def stop(self) -> None:
         if self._browser:
@@ -50,6 +50,11 @@ class BrowserManager:
                 user_agent=settings.user_agent,
                 viewport={"width": 1366, "height": 900},
                 locale="en-US",
+                java_script_enabled=True,
+            )
+            # Stealth-ish
+            await context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
             page = await context.new_page()
             try:
@@ -61,35 +66,35 @@ class BrowserManager:
 browser_manager = BrowserManager()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def safe_goto(page: Page, url: str, **kwargs) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=settings.nav_timeout_ms, **kwargs)
-    await page.wait_for_load_state("networkidle", timeout=15000)
     await asyncio.sleep(settings.min_delay_s)
 
 
-async def find_first(page: Page, selectors: List[str], timeout: int = 5000) -> Optional[Locator]:
-    """Try multiple selectors in order for auto-adapt to slight site changes. Logs which one worked."""
-    for sel in selectors:
+async def find_first_locator(page: Page, selector_list: List[str], timeout: int = 5000) -> Optional[Locator]:
+    """Try fallback selectors in order for auto-adaptation to slight site changes."""
+    for sel in selector_list:
         try:
             loc = page.locator(sel).first
-            if await loc.count() > 0 and await loc.is_visible(timeout=timeout):
-                logger.debug("Selector matched: {}", sel)
+            if await loc.count() > 0:
+                await loc.wait_for(state="attached", timeout=timeout)
+                logger.debug("Used selector: {}", sel)
                 return loc
         except Exception:
             continue
-    logger.warning("No selector matched from list: {}", selectors[:3])
+    logger.warning("No matching selector found from list: {}", selector_list[:3])
     return None
 
 
-async def find_all(page: Page, selectors: List[str], timeout: int = 3000) -> List[Locator]:
-    """Return all matching from first successful selector family."""
-    for sel in selectors:
+async def get_all_matching(page: Page, selector_list: List[str]) -> List[Locator]:
+    """Return all elements matching the first successful selector strategy."""
+    for sel in selector_list:
         try:
             locs = page.locator(sel)
             count = await locs.count()
             if count > 0:
-                logger.debug("Found {} elements with {}", count, sel)
+                logger.debug("Matched {} elements with {}", count, sel)
                 return [locs.nth(i) for i in range(count)]
         except Exception:
             continue

@@ -1,4 +1,4 @@
-"""Central configuration - production ready with adaptable selectors for slight site changes."""
+"""Production config with multi-fallback selectors for auto-adaptation to slight site changes."""
 
 from pydantic_settings import BaseSettings
 from typing import List, Dict
@@ -11,7 +11,11 @@ class Settings(BaseSettings):
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/126.0.0.0 Safari/537.36"
     )
-    browser_args: List[str] = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+    browser_args: List[str] = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+    ]
     nav_timeout_ms: int = 45000
     min_delay_s: float = 1.8
     max_concurrent_pages: int = 3
@@ -19,63 +23,53 @@ class Settings(BaseSettings):
     hierarchy_cache_path: str = "data/league_hierarchy.json"
     cache_ttl_hours: int = 12
 
-    # Multi-fallback selectors for auto-adapt to slight site changes.
-    # Prefer text/role first, then class patterns. Easy to extend.
+    # Multi-fallback selectors for auto-adaptation.
+    # Order: try first, then next if not found. Prefer role/text based.
+    # Update these lists when site changes slightly.
     selectors: Dict[str, List[str]] = {
-        "sport_links": [
-            "a[href*='/football/']",
-            "a[href*='/basketball/']",
-            "nav a",
-            "[class*='sport'] a",
+        "top_sports_links": [
+            "nav a[href*='/']",
+            "header a[href*='/football/'], header a[href*='/basketball/']",
+            "[class*='menu'] a[href*='/']",
+            "a[href*='/football/'], a[href*='/volleyball/'], a[href*='/rugby']",
         ],
         "left_menu": [
-            "div.leftMenu",
-            "[class*='left-menu']",
+            "[class*='leftMenu']",
             "aside",
             "[class*='sidebar']",
-            "#leftMenu",
+            ".menu__section",
+            "[data-testid*='menu']",
         ],
-        "country_header": [
+        "country_headers": [
             "[class*='country']",
-            "div.country",
-            "span.country_name",
-            "h2, h3, h4",
+            "h3, h4, .heading",
+            "div[class*='header']",
         ],
-        "league_link": [
+        "league_links": [
+            "a[href*='/standings']",
+            "a[href*='/results']",
+            "a[href*='/fixtures']",
             "a[href*='/']",
-            "[class*='league'] a",
-            "a[class*='event__']",
         ],
         "standings_table": [
             "table",
-            "div.standings",
+            "[class*='standings'] table",
             "[class*='table']",
-            "[class*='standings']",
-            "div[class*='ui-table']",
+            "[role='table']",
+            ".ui-table",
         ],
-        "standings_row": [
-            "tr",
-            "div[class*='row']",
-            "[class*='table__row']",
-            "[class*='standing']",
-        ],
-        "results_container": [
-            "div.event",
+        "results_rows": [
             "[class*='event']",
             "[class*='match']",
-            "div[class*='sportName']",
-            "#live-table",
+            "[class*='result']",
+            "div[class*='row']",
         ],
         "show_more": [
-            "a[class*='more']",
             "button:has-text('Show more')",
             "a:has-text('Show more')",
-            "[class*='event__more']",
+            "[class*='more']",
+            "button[class*='load']",
         ],
-        "tab_standings": ["a:has-text('Standings')", "a[href*='standings']"],
-        "tab_results": ["a:has-text('Results')", "a[href*='results']"],
-        "tab_fixtures": ["a:has-text('Fixtures')", "a[href*='fixtures']"],
-        "tab_news": ["a:has-text('News')", "a[href*='news']"],
     }
 
     class Config:

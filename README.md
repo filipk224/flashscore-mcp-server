@@ -1,30 +1,33 @@
-# Flashscore MCP Server (Private Production)
+# Flashscore MCP Server (Private Production / IaaS)
 
-Private production MCP server for structured sports data from www.flashscore.com using Playwright.
+Private production-ready MCP server for www.flashscore.com sports data.
 
-**Auto-adapts to slight site changes** via multi-selector fallbacks + logging.
+## Key Features
+- **Auto-adapts** to slight site changes via multi-fallback selectors (config.py)
+- Real extractors for discovery (top menu sports, left menu countries/leagues)
+- Standings, results history (PF/PA mode + show-more), fixtures, news, archives
+- Caching, rate limiting, retries, logging
+- **IaaS ready**: Docker, healthcheck, env config, concurrent controls
 
-**IaaS ready** (Docker + env config for Railway / Fly.io / AWS / DigitalOcean / any container host).
-
-## Features
-- Sports (top menu) + Countries/Leagues (left menu) — on-demand
-- News, full results history (team + PF/PA), fixtures, standings (MP/W/L/PF/PA/Form), archives
-- Local stdio + hosted Docker
-- Production: rate limiting, retries, concurrency, modular extractors, multi-selector auto-adapt, caching, logging
-
-## Quick Start
+## Quick Start (Local)
 ```bash
 uv sync
 playwright install chromium
 uv run flashscore-mcp
 ```
 
-## IaaS Hosting
-```bash
-docker build -t flashscore-mcp .
-docker run -p 8000:8000 -e FLASHSCORE_HEADLESS=true flashscore-mcp
-```
-Deploy the Docker image to your preferred IaaS (Railway, Fly, Render, AWS ECS, etc.). Use env vars from `.env.example`. For long-running hosted use, consider adding an HTTP/SSE transport wrapper (FastMCP supports it).
+## IaaS Hosting (Railway / Fly / DO / AWS etc.)
+1. Use the Dockerfile
+2. Set env vars from `.env.example`
+3. For HTTP/SSE transport (recommended for hosted), extend server.py with `mcp.run_sse_async()` or platform-specific
+4. Scale concurrency carefully (browser RAM)
+
+## Config
+All selectors live in `src/flashscore_mcp/config.py` as lists of fallbacks.  
+Update the lists when Flashscore changes class names — the first working selector is used automatically.
+
+## Tools
+list_sports, list_countries, list_leagues, get_standings, get_results_history, get_upcoming_fixtures, get_news, list_archive_seasons + historical variants.
 
 ## License
-Proprietary — private production use only.
+Proprietary – private production use only.
