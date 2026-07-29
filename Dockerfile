@@ -1,25 +1,16 @@
-# Production Dockerfile for IaaS (Railway, Fly.io, AWS ECS, DigitalOcean, etc.)
-FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
+# Apify Actor base with Playwright (browsers pre-installed)
+FROM apify/actor-python-playwright:3.12
 
-WORKDIR /app
+# Copy dependency files first for better layer caching
+COPY --chown=myuser:myuser requirements.txt pyproject.toml ./
 
-# System deps already in base
-COPY pyproject.toml README.md ./
-COPY src ./src
-COPY data ./data
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt \
+    && echo "Installed packages:" \
+    && pip list
 
-RUN pip install --no-cache-dir uv \
-    && uv pip install --system -e . \
-    && playwright install-deps chromium || true
+# Copy the rest of the source
+COPY --chown=myuser:myuser . ./
 
-ENV FLASHSCORE_HEADLESS=true \
-    PYTHONUNBUFFERED=1 \
-    FLASHSCORE_MAX_CONCURRENT_PAGES=2 \
-    FLASHSCORE_MIN_DELAY_S=1.8
-
-# Healthcheck for IaaS
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import flashscore_mcp; print('ok')" || exit 1
-
-# Default: stdio. For hosted HTTP/SSE override CMD or use platform start command
-CMD ["python", "-m", "flashscore_mcp.server"]
+# Default command: run the Apify Actor entrypoint
+CMD ["python", "-m", "src.main"]

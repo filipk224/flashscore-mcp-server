@@ -1,0 +1,19 @@
+{
+  "actorSpecification": 1,
+  "name": "flashscore-mcp-server",
+  "title": "Flashscore MCP Server",
+  "description": "Private production MCP server for structured sports data from Flashscore.com (results, standings, fixtures, news, archives). Playwright-based, adaptable selectors.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "meta": {
+    "templateId": "python-mcp-empty"
+  },
+  "dockerfile": "./Dockerfile",
+  "readme": "./README.md",
+  "input": "./.actor/INPUT_SCHEMA.json",
+  "usesStandbyMode": true,
+  "webServerMcpPath": "/mcp",
+  "defaultMemoryMbytes": 2048,
+  "minMemoryMbytes": 1024,
+  "maxMemoryMbytes": 4096
+}

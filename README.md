@@ -2,6 +2,8 @@
 
 **Private production MCP server** for structured sports data extraction from www.flashscore.com using Playwright.
 
+Ready for **Apify Actor** deployment (Standby mode + Streamable HTTP MCP endpoint).
+
 ## Features
 - Sports discovery via top menu
 - Countries & leagues via left menu (on-demand)
@@ -10,19 +12,34 @@
 - Upcoming fixtures
 - Current standings (MP, W, L, PF, PA, Form)
 - Previous seasons / archives
-- Local stdio **and online hosted** (HTTP/SSE + Docker)
+- Local stdio **and** Apify hosted (HTTP/SSE + Standby)
 - Production-ready: rate limiting, retries, modular extractors, logging, config via env, adaptable selectors
 
 See [PRD.md](PRD.md) for full requirements.
 
-## Quick Start (Local / Production)
+## Apify Deployment (recommended)
+
+The project is structured as an Apify Actor:
+
+- `.actor/actor.json` – metadata + `usesStandbyMode: true` + `webServerMcpPath: "/mcp"`
+- `Dockerfile` – based on `apify/actor-python-playwright`
+- `src/main.py` – starts FastMCP over Streamable HTTP on the Actor web-server port
+- `requirements.txt` – Apify SDK + FastMCP + Playwright + deps
+
+### Deploy steps
+1. Install [Apify CLI](https://docs.apify.com/cli) and log in: `apify login`
+2. From the project root: `apify push`
+3. Enable Standby in the Actor settings (or it is already declared in actor.json)
+4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with Apify token)
+
+### Local run (stdio)
 ```bash
 uv sync
 playwright install chromium
 uv run flashscore-mcp
 ```
 
-MCP client config example (Claude Desktop / Cursor / custom):
+MCP client config example:
 ```json
 {
   "mcpServers": {
@@ -34,26 +51,24 @@ MCP client config example (Claude Desktop / Cursor / custom):
 }
 ```
 
-## Hosted Deployment
-- Use the included Dockerfile (Playwright base image).
-- Supports HTTP/SSE transport for online hosting (Railway, Fly.io, private VPS, Apify, etc.).
-- Configure via environment variables (see `.env.example`).
-- Rate limiting, concurrency controls, and caching ready for production load.
-
 ## Project Structure
 ```
-src/flashscore_mcp/
-├── server.py
-├── browser.py
-├── models.py
-├── config.py
-└── extractors/
-    ├── discovery.py
-    ├── standings.py
-    ├── results.py
-    ├── fixtures.py
-    ├── news.py
-    └── archive.py
+.actor/
+  actor.json
+  INPUT_SCHEMA.json
+src/
+  main.py                 # Apify entrypoint
+  flashscore_mcp/
+    server.py
+    browser.py
+    models.py
+    config.py
+    extractors/
+Dockerfile
+requirements.txt
+pyproject.toml
+README.md
+PRD.md
 ```
 
 ## License
