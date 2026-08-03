@@ -65,44 +65,54 @@ jobs:
           script_stop: true
           envs: GHCR_TOKEN,GITHUB_ACTOR
           script: |
-            set -euo pipefail
+            set -uo pipefail
 
             echo "=== Checking Docker installation ==="
+            NEED_INSTALL=0
             if ! command -v docker >/dev/null 2>&1; then
-              echo "Docker not found. Installing via official script..."
+              NEED_INSTALL=1
+            elif ! docker --version >/dev/null 2>&1; then
+              NEED_INSTALL=1
+            fi
+
+            if [ "$NEED_INSTALL" -eq 1 ]; then
+              echo "Docker missing or broken. Installing via official script..."
               curl -fsSL https://get.docker.com | sudo sh
               sudo usermod -aG docker "$(whoami)" || true
               sudo systemctl enable --now docker || sudo service docker start || true
-              echo "Docker installed."
+              sleep 2
+              echo "Docker install finished."
             else
-              echo "Docker already present: $(docker --version)"
+              echo "Docker present: $(docker --version 2>/dev/null || echo ok)"
             fi
 
-            if ! docker compose version >/dev/null 2>&1; then
-              echo "docker compose plugin missing; attempting install..."
-              sudo apt-get update -qq
-              sudo apt-get install -y -qq docker-compose-plugin || true
-            fi
-
+            # Prefer sudo docker if non-root cannot talk to the daemon
             DOCKER="docker"
             if ! docker info >/dev/null 2>&1; then
+              echo "Using sudo docker (daemon requires elevated access)"
               DOCKER="sudo docker"
+            fi
+
+            if ! $DOCKER compose version >/dev/null 2>&1; then
+              echo "Installing docker-compose-plugin..."
+              sudo apt-get update -qq || true
+              sudo apt-get install -y -qq docker-compose-plugin || true
             fi
 
             echo "=== GitHub Container Registry login ==="
             if [ -n "${GHCR_TOKEN:-}" ]; then
               echo "$GHCR_TOKEN" | $DOCKER login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             else
-              echo "No GHCR token provided. Pull will only succeed if the package is public."
+              echo "No GHCR token; relying on public package visibility."
             fi
 
             DEPLOY_DIR="/opt/flashscore-mcp"
             sudo mkdir -p "$DEPLOY_DIR"
             sudo chown "$(whoami):$(whoami)" "$DEPLOY_DIR" 2>/dev/null || true
-            cd "$DEPLOY_DIR"
+            cd "$DEPLOY_DIR" || exit 1
             mkdir -p data
 
-            # Always write a known-good compose file (avoids broken heredoc YAML)
+            echo "=== Writing docker-compose.yml ==="
             printf '%s\n' \
               'services:' \
               '  flashscore-mcp:' \
@@ -119,8 +129,6 @@ jobs:
               '    volumes:' \
               '      - ./data:/app/data' \
               > docker-compose.yml
-
-            echo "=== docker-compose.yml ==="
             cat docker-compose.yml
 
             echo "=== Pulling latest image ==="
@@ -134,6 +142,7 @@ jobs:
 
             echo "=== Deployment finished ==="
             $DOCKER compose ps
+            $DOCKER compose logs --tail=30 || true
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
