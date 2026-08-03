@@ -19,8 +19,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,16 +54,26 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 2. Deploy to Rumble Cloud VM via SSH
-  #    Requires repository secrets (see README):
-  #      RUMBLE_SSH_HOST, RUMBLE_SSH_USER, RUMBLE_SSH_PRIVATE_KEY
-  #      Optional: RUMBLE_SSH_PORT (default 22), GHCR_PULL_TOKEN
+  #
+  # Required repository secrets (Settings → Secrets and variables → Actions):
+  #   RUMBLE_SSH_HOST          Public IP or hostname of the VM
+  #   RUMBLE_SSH_USER          SSH username (e.g. ubuntu)
+  #   RUMBLE_SSH_PRIVATE_KEY   Full private key (PEM)
+  #
+  # Optional:
+  #   RUMBLE_SSH_PORT          SSH port (default 22)
+  #   GHCR_PULL_TOKEN          GitHub PAT with read:packages (strongly recommended)
+  #
+  # Also set repository variable ENABLE_RUMBLE_DEPLOY = true
+  # (Settings → Secrets and variables → Actions → Variables)
+  # to activate the deploy job.
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to Rumble Cloud
     needs: build-and-push
     runs-on: ubuntu-latest
-    # Skip deploy if the required host secret is not configured
-    if: ${{ vars.ENABLE_RUMBLE_DEPLOY == 'true' || secrets.RUMBLE_SSH_HOST != '' }}
+    # Only run when the repository variable is explicitly enabled
+    if: ${{ vars.ENABLE_RUMBLE_DEPLOY == 'true' }}
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -75,23 +83,21 @@ jobs:
           key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
           port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
           script_stop: true
-          envs: GHCR_TOKEN,IMAGE
+          envs: GHCR_TOKEN
           script: |
             set -euo pipefail
 
             echo "Logging into GitHub Container Registry..."
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            # Working directory on the Rumble Cloud VM
-            # Create it on first run if it does not exist
-            DEPLOY_DIR="${DEPLOY_DIR:-/opt/flashscore-mcp}"
+            DEPLOY_DIR="/opt/flashscore-mcp"
             sudo mkdir -p "$DEPLOY_DIR"
-            sudo chown "$(whoami)" "$DEPLOY_DIR" || true
+            sudo chown "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            # Ensure a minimal docker-compose.yml exists (idempotent)
+            # Create a minimal docker-compose.yml on first run only
             if [ ! -f docker-compose.yml ]; then
-              cat > docker-compose.yml << 'EOF'
+              cat > docker-compose.yml << 'COMPOSE_EOF'
             services:
               flashscore-mcp:
                 image: ghcr.io/filipk224/flashscore-mcp-server:latest
@@ -106,9 +112,7 @@ jobs:
                   - FLASHSCORE_MAX_CONCURRENT_PAGES=2
                 volumes:
                   - ./data:/app/data
-                # Uncomment and adjust if you need more memory on the VM
-                # mem_limit: 2g
-            EOF
+            COMPOSE_EOF
             fi
 
             mkdir -p data
@@ -119,12 +123,11 @@ jobs:
             echo "Recreating container..."
             docker compose up -d --force-recreate --remove-orphans
 
-            echo "Cleaning up old images..."
+            echo "Pruning unused images..."
             docker image prune -f
 
-            echo "Deployment finished. Current status:"
+            echo "Deployment finished. Status:"
             docker compose ps
         env:
-          # Prefer a dedicated PAT with read:packages; fall back to GITHUB_TOKEN
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # Use a dedicated PAT with read:packages if available; otherwise GITHUB_TOKEN
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN != '' && secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
