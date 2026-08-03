@@ -93,26 +93,11 @@ jobs:
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            echo "=== Write docker-compose.yml ==="
-            cat > docker-compose.yml <<'YAML'
-            services:
-              flashscore-mcp:
-                image: ghcr.io/filipk224/flashscore-mcp-server:latest
-                container_name: flashscore-mcp
-                restart: unless-stopped
-                ports:
-                  - "8000:8000"
-                environment:
-                  - PORT=8000
-                  - HOST=0.0.0.0
-                  - FLASHSCORE_HEADLESS=true
-                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
-                volumes:
-                  - ./data:/app/data
-            YAML
-            # Strip leading spaces from indented heredoc
-            sed -i 's/^            //' docker-compose.yml
+            echo "=== Write docker-compose.yml (clean via base64) ==="
+            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIGVudmlyb25tZW50OgogICAgICAtIFBPUlQ9ODAwMAogICAgICAtIEhPU1Q9MC4wLjAuMAogICAgICAtIEZMQVNIU0NPUkVfSEVBRExFU1M9dHJ1ZQogICAgICAtIEZMQVNIU0NPUkVfTUFYX0NPTkNVUlJFTlRfUEFHRVM9MgogICAgdm9sdW1lczoKICAgICAgLSAuL2RhdGE6L2FwcC9kYXRhCg==' | base64 -d > docker-compose.yml
+            echo "--- docker-compose.yml content ---"
             cat docker-compose.yml
+            echo "--- end ---"
 
             echo "=== Pull image ==="
             sudo docker compose pull
