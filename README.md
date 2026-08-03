@@ -74,39 +74,67 @@ docker compose up --build
 
 A GitHub Actions workflow (`.github/workflows/deploy-rumble-cloud.yml`) builds the Docker image, pushes it to GitHub Container Registry (`ghcr.io/filipk224/flashscore-mcp-server`), and deploys it to a Rumble Cloud VM over SSH on every push to `main`.
 
-### One-time setup on Rumble Cloud
+### One-time setup on the Rumble Cloud VM
 
-1. Create a VM (Ubuntu 22.04/24.04 recommended) with at least 2 GB RAM.
-2. Install Docker and Docker Compose plugin:
+1. Create a VM (Ubuntu 22.04 or 24.04 recommended) with **at least 2 GB RAM**.
+2. Install Docker:
    ```bash
    curl -fsSL https://get.docker.com | sh
    sudo usermod -aG docker $USER
-   # log out / in, then verify: docker compose version
+   # log out and back in, then verify:
+   docker compose version
    ```
-3. Open port 8000 (or your chosen port) in the Rumble Cloud security group / firewall for the VM.
-4. (Optional) Point a domain or floating IP to the VM.
+3. Open port **8000** (or your chosen port) in the Rumble Cloud security group / firewall.
+4. Create the deployment directory and compose file:
+   ```bash
+   sudo mkdir -p /opt/flashscore-mcp
+   sudo chown $USER:$USER /opt/flashscore-mcp
+   cd /opt/flashscore-mcp
+   mkdir -p data
 
-### One-time setup in GitHub repository secrets
+   cat > docker-compose.yml << 'EOF'
+   services:
+     flashscore-mcp:
+       image: ghcr.io/filipk224/flashscore-mcp-server:latest
+       container_name: flashscore-mcp
+       restart: unless-stopped
+       ports:
+         - "8000:8000"
+       environment:
+         - PORT=8000
+         - HOST=0.0.0.0
+         - FLASHSCORE_HEADLESS=true
+         - FLASHSCORE_MAX_CONCURRENT_PAGES=2
+       volumes:
+         - ./data:/app/data
+   EOF
+   ```
 
-Go to **Settings → Secrets and variables → Actions** and add:
+### One-time setup in the GitHub repository
+
+**A. Secrets** (Settings → Secrets and variables → Actions → Secrets)
 
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `RUMBLE_SSH_HOST` | Yes | Public IP or hostname of the Rumble Cloud VM |
 | `RUMBLE_SSH_USER` | Yes | SSH username (e.g. `ubuntu`) |
-| `RUMBLE_SSH_PRIVATE_KEY` | Yes | Private key that can log in as that user (full PEM content) |
-| `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
-| `GHCR_PULL_TOKEN` | Recommended | GitHub PAT with `read:packages` scope so the VM can pull the image. If omitted the workflow falls back to `GITHUB_TOKEN` (may have limited lifetime). |
+| `RUMBLE_SSH_PRIVATE_KEY` | Yes | Full private key (PEM content) that can log in as that user |
+| `RUMBLE_SSH_PORT` | No | SSH port (defaults to 22) |
+| `GHCR_PULL_TOKEN` | Strongly recommended | GitHub Personal Access Token with `read:packages` scope so the VM can pull the image |
 
-After the secrets are set, every push to `main` will:
+**B. Variable** (Settings → Secrets and variables → Actions → Variables)
 
-1. Build the image
-2. Push `ghcr.io/filipk224/flashscore-mcp-server:latest` (and a sha-tagged version)
-3. SSH into the VM, pull the new image, and recreate the container
+| Variable | Value |
+|----------|-------|
+| `ENABLE_RUMBLE_DEPLOY` | `true` |
 
-The workflow also creates a minimal `docker-compose.yml` on the VM on first run (under `/opt/flashscore-mcp`). You can customise that file later; subsequent deploys only pull and restart.
+### How it works after setup
 
-You can also trigger a deploy manually from the **Actions** tab (`workflow_dispatch`).
+Every push to `main` (or a manual run from the Actions tab):
+
+1. Builds the Docker image
+2. Pushes `ghcr.io/filipk224/flashscore-mcp-server:latest` (+ a sha-tagged version)
+3. SSHs into the VM, logs into GHCR, pulls the new image, and recreates the container
 
 ### Verifying the deployment
 
@@ -114,7 +142,7 @@ On the VM:
 ```bash
 cd /opt/flashscore-mcp
 docker compose ps
-docker compose logs -f
+docker compose logs -f --tail=100
 ```
 
 MCP endpoint: `http://<VM-IP-or-domain>:8000/mcp`

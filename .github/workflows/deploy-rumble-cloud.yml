@@ -3,16 +3,13 @@ name: Build & Deploy to Rumble Cloud
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # allow manual runs from the Actions tab
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}  # filipk224/flashscore-mcp-server
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 1. Build Docker image and push to GitHub Container Registry
-  # ---------------------------------------------------------------------------
   build-and-push:
     name: Build and push image
     runs-on: ubuntu-latest
@@ -33,7 +30,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata (tags, labels)
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -52,27 +49,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------------------------------------------------------------------------
-  # 2. Deploy to Rumble Cloud VM via SSH
-  #
-  # Required repository secrets (Settings → Secrets and variables → Actions):
-  #   RUMBLE_SSH_HOST          Public IP or hostname of the VM
-  #   RUMBLE_SSH_USER          SSH username (e.g. ubuntu)
-  #   RUMBLE_SSH_PRIVATE_KEY   Full private key (PEM)
-  #
-  # Optional:
-  #   RUMBLE_SSH_PORT          SSH port (default 22)
-  #   GHCR_PULL_TOKEN          GitHub PAT with read:packages (strongly recommended)
-  #
-  # Also set repository variable ENABLE_RUMBLE_DEPLOY = true
-  # (Settings → Secrets and variables → Actions → Variables)
-  # to activate the deploy job.
-  # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to Rumble Cloud
     needs: build-and-push
     runs-on: ubuntu-latest
-    # Only run when the repository variable is explicitly enabled
+    # Activate by setting repository variable ENABLE_RUMBLE_DEPLOY=true
     if: ${{ vars.ENABLE_RUMBLE_DEPLOY == 'true' }}
     steps:
       - name: Deploy over SSH
@@ -91,31 +72,13 @@ jobs:
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
             DEPLOY_DIR="/opt/flashscore-mcp"
-            sudo mkdir -p "$DEPLOY_DIR"
-            sudo chown "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
-            cd "$DEPLOY_DIR"
-
-            # Create a minimal docker-compose.yml on first run only
-            if [ ! -f docker-compose.yml ]; then
-              cat > docker-compose.yml << 'COMPOSE_EOF'
-            services:
-              flashscore-mcp:
-                image: ghcr.io/filipk224/flashscore-mcp-server:latest
-                container_name: flashscore-mcp
-                restart: unless-stopped
-                ports:
-                  - "8000:8000"
-                environment:
-                  - PORT=8000
-                  - HOST=0.0.0.0
-                  - FLASHSCORE_HEADLESS=true
-                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
-                volumes:
-                  - ./data:/app/data
-            COMPOSE_EOF
+            if [ ! -d "$DEPLOY_DIR" ] || [ ! -f "$DEPLOY_DIR/docker-compose.yml" ]; then
+              echo "ERROR: $DEPLOY_DIR/docker-compose.yml not found."
+              echo "Create it once on the VM (see README) then re-run the workflow."
+              exit 1
             fi
 
-            mkdir -p data
+            cd "$DEPLOY_DIR"
 
             echo "Pulling latest image..."
             docker compose pull
@@ -129,5 +92,4 @@ jobs:
             echo "Deployment finished. Status:"
             docker compose ps
         env:
-          # Use a dedicated PAT with read:packages if available; otherwise GITHUB_TOKEN
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN != '' && secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
