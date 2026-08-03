@@ -6,6 +6,7 @@ Supports:
 - **Local stdio** (for desktop MCP clients)
 - **Apify Actor** (Standby + Streamable HTTP)
 - **General IaaS / cloud** (Railway, Fly.io, Render, DigitalOcean, AWS, Cloud Run, etc.)
+- **Rumble Cloud** (automated deploy via GitHub Actions on every push to `main`)
 
 ## Features
 - Sports discovery via top menu
@@ -44,9 +45,9 @@ MCP client config example:
 
 ---
 
-## 2. General IaaS / Cloud deployment (recommended for most hosts)
+## 2. General IaaS / Cloud deployment
 
-The project is now prepared for any Docker-compatible IaaS platform.
+The project is prepared for any Docker-compatible IaaS platform.
 
 ### Key files
 - `Dockerfile` – production image (Playwright browsers pre-installed)
@@ -62,70 +63,88 @@ docker compose up --build
 
 ### Deploy to common platforms
 
-**Railway**
-1. Connect the GitHub repository.
-2. Railway auto-detects the Dockerfile.
-3. Set environment variables from `.env.example` (PORT is usually injected).
-4. Add a persistent volume mounted at `/app/data` if you want results cache to survive restarts.
-5. Deploy. Endpoint will be `https://<your-app>.up.railway.app/mcp`.
-
-**Fly.io**
-```bash
-fly launch          # creates fly.toml from Dockerfile
-fly volumes create flashscore_data --size 1
-# edit fly.toml to mount the volume at /app/data
-fly deploy
-```
-
-**Render**
-1. New → Web Service → connect repo.
-2. Runtime: Docker.
-3. Set env vars. Add a Disk mounted at `/app/data` for cache persistence.
-
-**DigitalOcean App Platform / AWS ECS / Google Cloud Run / Azure**
-- Use the provided Dockerfile.
-- Expose port 8000 (or the value of `$PORT`).
-- Mount a persistent volume/filesystem at `/app/data` for the results cache.
-- Set the environment variables listed in `.env.example`.
-
-### Important production notes
-- **Persistent cache**: Historical results are immutable and cached under `/app/data`. Mount a volume there so repeated calls stay cheap and fast.
-- **Memory**: Playwright + Chromium typically needs ≥ 1–2 GB. Configure the platform accordingly.
-- **Concurrency**: Keep `FLASHSCORE_MAX_CONCURRENT_PAGES` low (1–3) on small instances.
-- **Health**: The image includes a HEALTHCHECK that verifies the process is listening on `$PORT`.
+**Railway / Render / Fly.io / DigitalOcean / AWS / Cloud Run**
+- Connect the repository; the Dockerfile is auto-detected on most platforms.
+- Set environment variables from `.env.example`.
+- Mount a persistent volume at `/app/data` for the results cache.
 
 ---
 
-## 3. Apify Deployment
+## 3. Rumble Cloud – automated deploy on push to main
+
+A GitHub Actions workflow (`.github/workflows/deploy-rumble-cloud.yml`) builds the Docker image, pushes it to GitHub Container Registry (`ghcr.io/filipk224/flashscore-mcp-server`), and deploys it to a Rumble Cloud VM over SSH on every push to `main`.
+
+### One-time setup on Rumble Cloud
+
+1. Create a VM (Ubuntu 22.04/24.04 recommended) with at least 2 GB RAM.
+2. Install Docker and Docker Compose plugin:
+   ```bash
+   curl -fsSL https://get.docker.com | sh
+   sudo usermod -aG docker $USER
+   # log out / in, then verify: docker compose version
+   ```
+3. Open port 8000 (or your chosen port) in the Rumble Cloud security group / firewall for the VM.
+4. (Optional) Point a domain or floating IP to the VM.
+
+### One-time setup in GitHub repository secrets
+
+Go to **Settings → Secrets and variables → Actions** and add:
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `RUMBLE_SSH_HOST` | Yes | Public IP or hostname of the Rumble Cloud VM |
+| `RUMBLE_SSH_USER` | Yes | SSH username (e.g. `ubuntu`) |
+| `RUMBLE_SSH_PRIVATE_KEY` | Yes | Private key that can log in as that user (full PEM content) |
+| `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
+| `GHCR_PULL_TOKEN` | Recommended | GitHub PAT with `read:packages` scope so the VM can pull the image. If omitted the workflow falls back to `GITHUB_TOKEN` (may have limited lifetime). |
+
+After the secrets are set, every push to `main` will:
+
+1. Build the image
+2. Push `ghcr.io/filipk224/flashscore-mcp-server:latest` (and a sha-tagged version)
+3. SSH into the VM, pull the new image, and recreate the container
+
+The workflow also creates a minimal `docker-compose.yml` on the VM on first run (under `/opt/flashscore-mcp`). You can customise that file later; subsequent deploys only pull and restart.
+
+You can also trigger a deploy manually from the **Actions** tab (`workflow_dispatch`).
+
+### Verifying the deployment
+
+On the VM:
+```bash
+cd /opt/flashscore-mcp
+docker compose ps
+docker compose logs -f
+```
+
+MCP endpoint: `http://<VM-IP-or-domain>:8000/mcp`
+
+---
+
+## 4. Apify Deployment
 
 The project remains fully compatible with Apify Actors.
 
 - `.actor/actor.json` – metadata + `usesStandbyMode: true` + `webServerMcpPath: "/mcp"`
-- `src/main.py` – Apify-specific entrypoint (Actor context + HTTP server)
-- `Dockerfile` – still based on `apify/actor-python-playwright`
+- `src/main.py` – Apify-specific entrypoint
 
 ### Deploy steps
 1. Install [Apify CLI](https://docs.apify.com/cli) and log in: `apify login`
 2. From the project root: `apify push`
-3. Enable Standby in the Actor settings (already declared in actor.json)
+3. Enable Standby in the Actor settings
 4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with Apify token)
-
-> Note: The default `CMD` in the Dockerfile now points to the generic HTTP server.
-> Apify’s platform respects the Actor configuration and can still use `src/main.py`
-> when running in Actor mode. You can also override the start command in the Apify console if needed.
 
 ---
 
 ## Project Structure
 ```
-.actor/
-  actor.json
-  INPUT_SCHEMA.json
+.github/workflows/
+  deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble Cloud VM
 src/
   main.py                      # Apify entrypoint
   flashscore_mcp/
     http_server.py             # Generic IaaS HTTP entrypoint
-    server.py                  # FastMCP tools
+    server.py
     browser.py
     models.py
     config.py

@@ -1,0 +1,130 @@
+name: Build & Deploy to Rumble Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}  # filipk224/flashscore-mcp-server
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Build Docker image and push to GitHub Container Registry
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # 2. Deploy to Rumble Cloud VM via SSH
+  #    Requires repository secrets (see README):
+  #      RUMBLE_SSH_HOST, RUMBLE_SSH_USER, RUMBLE_SSH_PRIVATE_KEY
+  #      Optional: RUMBLE_SSH_PORT (default 22), GHCR_PULL_TOKEN
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Rumble Cloud
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Skip deploy if the required host secret is not configured
+    if: ${{ vars.ENABLE_RUMBLE_DEPLOY == 'true' || secrets.RUMBLE_SSH_HOST != '' }}
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.RUMBLE_SSH_HOST }}
+          username: ${{ secrets.RUMBLE_SSH_USER }}
+          key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
+          script_stop: true
+          envs: GHCR_TOKEN,IMAGE
+          script: |
+            set -euo pipefail
+
+            echo "Logging into GitHub Container Registry..."
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Working directory on the Rumble Cloud VM
+            # Create it on first run if it does not exist
+            DEPLOY_DIR="${DEPLOY_DIR:-/opt/flashscore-mcp}"
+            sudo mkdir -p "$DEPLOY_DIR"
+            sudo chown "$(whoami)" "$DEPLOY_DIR" || true
+            cd "$DEPLOY_DIR"
+
+            # Ensure a minimal docker-compose.yml exists (idempotent)
+            if [ ! -f docker-compose.yml ]; then
+              cat > docker-compose.yml << 'EOF'
+            services:
+              flashscore-mcp:
+                image: ghcr.io/filipk224/flashscore-mcp-server:latest
+                container_name: flashscore-mcp
+                restart: unless-stopped
+                ports:
+                  - "8000:8000"
+                environment:
+                  - PORT=8000
+                  - HOST=0.0.0.0
+                  - FLASHSCORE_HEADLESS=true
+                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
+                volumes:
+                  - ./data:/app/data
+                # Uncomment and adjust if you need more memory on the VM
+                # mem_limit: 2g
+            EOF
+            fi
+
+            mkdir -p data
+
+            echo "Pulling latest image..."
+            docker compose pull
+
+            echo "Recreating container..."
+            docker compose up -d --force-recreate --remove-orphans
+
+            echo "Cleaning up old images..."
+            docker image prune -f
+
+            echo "Deployment finished. Current status:"
+            docker compose ps
+        env:
+          # Prefer a dedicated PAT with read:packages; fall back to GITHUB_TOKEN
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
