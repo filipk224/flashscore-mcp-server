@@ -65,84 +65,65 @@ jobs:
           script_stop: true
           envs: GHCR_TOKEN,GITHUB_ACTOR
           script: |
-            set -uo pipefail
-
-            echo "=== Checking Docker installation ==="
-            NEED_INSTALL=0
+            echo "=== Ensure Docker is installed ==="
             if ! command -v docker >/dev/null 2>&1; then
-              NEED_INSTALL=1
-            elif ! docker --version >/dev/null 2>&1; then
-              NEED_INSTALL=1
-            fi
-
-            if [ "$NEED_INSTALL" -eq 1 ]; then
-              echo "Docker missing or broken. Installing via official script..."
+              echo "Installing Docker..."
               curl -fsSL https://get.docker.com | sudo sh
-              sudo usermod -aG docker "$(whoami)" || true
-              sudo systemctl enable --now docker || sudo service docker start || true
-              sleep 2
-              echo "Docker install finished."
-            else
-              echo "Docker present: $(docker --version 2>/dev/null || echo ok)"
+              sudo systemctl enable --now docker || true
+              sleep 3
             fi
+            sudo docker --version
 
-            # Prefer sudo docker if non-root cannot talk to the daemon
-            DOCKER="docker"
-            if ! docker info >/dev/null 2>&1; then
-              echo "Using sudo docker (daemon requires elevated access)"
-              DOCKER="sudo docker"
-            fi
-
-            if ! $DOCKER compose version >/dev/null 2>&1; then
-              echo "Installing docker-compose-plugin..."
+            echo "=== Ensure compose plugin ==="
+            if ! sudo docker compose version >/dev/null 2>&1; then
               sudo apt-get update -qq || true
               sudo apt-get install -y -qq docker-compose-plugin || true
             fi
+            sudo docker compose version
 
-            echo "=== GitHub Container Registry login ==="
+            echo "=== GHCR login ==="
             if [ -n "${GHCR_TOKEN:-}" ]; then
-              echo "$GHCR_TOKEN" | $DOCKER login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+              echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
             else
-              echo "No GHCR token; relying on public package visibility."
+              echo "No GHCR_PULL_TOKEN; using public package"
             fi
 
-            DEPLOY_DIR="/opt/flashscore-mcp"
-            sudo mkdir -p "$DEPLOY_DIR"
-            sudo chown "$(whoami):$(whoami)" "$DEPLOY_DIR" 2>/dev/null || true
-            cd "$DEPLOY_DIR" || exit 1
-            mkdir -p data
+            DEPLOY_DIR=/opt/flashscore-mcp
+            sudo mkdir -p "$DEPLOY_DIR/data"
+            sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
+            cd "$DEPLOY_DIR"
 
-            echo "=== Writing docker-compose.yml ==="
-            printf '%s\n' \
-              'services:' \
-              '  flashscore-mcp:' \
-              '    image: ghcr.io/filipk224/flashscore-mcp-server:latest' \
-              '    container_name: flashscore-mcp' \
-              '    restart: unless-stopped' \
-              '    ports:' \
-              '      - "8000:8000"' \
-              '    environment:' \
-              '      - PORT=8000' \
-              '      - HOST=0.0.0.0' \
-              '      - FLASHSCORE_HEADLESS=true' \
-              '      - FLASHSCORE_MAX_CONCURRENT_PAGES=2' \
-              '    volumes:' \
-              '      - ./data:/app/data' \
-              > docker-compose.yml
+            echo "=== Write docker-compose.yml ==="
+            cat > docker-compose.yml <<'YAML'
+            services:
+              flashscore-mcp:
+                image: ghcr.io/filipk224/flashscore-mcp-server:latest
+                container_name: flashscore-mcp
+                restart: unless-stopped
+                ports:
+                  - "8000:8000"
+                environment:
+                  - PORT=8000
+                  - HOST=0.0.0.0
+                  - FLASHSCORE_HEADLESS=true
+                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
+                volumes:
+                  - ./data:/app/data
+            YAML
+            # Strip leading spaces from indented heredoc
+            sed -i 's/^            //' docker-compose.yml
             cat docker-compose.yml
 
-            echo "=== Pulling latest image ==="
-            $DOCKER compose pull
+            echo "=== Pull image ==="
+            sudo docker compose pull
 
-            echo "=== Recreating container ==="
-            $DOCKER compose up -d --force-recreate --remove-orphans
+            echo "=== Start container ==="
+            sudo docker compose up -d --force-recreate --remove-orphans
 
-            echo "=== Pruning unused images ==="
-            $DOCKER image prune -f || true
-
-            echo "=== Deployment finished ==="
-            $DOCKER compose ps
-            $DOCKER compose logs --tail=30 || true
+            echo "=== Status ==="
+            sudo docker compose ps
+            sudo docker compose logs --tail=40 || true
+            echo "=== Deploy complete ==="
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
