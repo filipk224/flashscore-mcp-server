@@ -1,6 +1,6 @@
 [project]
 name = "flashscore-mcp-server"
-version = "0.1.1"
+version = "0.1.2"
 description = "Private production MCP server for Flashscore.com - adaptable extractors, IaaS ready"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,10 +1,13 @@
-"""Production config with multi-fallback selectors for auto-adaptation to slight site changes."""
+"""Production config with multi-fallback selectors for auto-adaptation to slight site changes.
+IaaS-friendly: all key settings overridable via FLASHSCORE_* environment variables.
+"""
 
 from pydantic_settings import BaseSettings
 from typing import List, Dict
 
 
 class Settings(BaseSettings):
+    # Browser / scraping
     headless: bool = True
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -15,13 +18,23 @@ class Settings(BaseSettings):
         "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
         "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",  # important in containers with limited /dev/shm
     ]
     nav_timeout_ms: int = 45000
     min_delay_s: float = 1.8
-    max_concurrent_pages: int = 3
+    max_concurrent_pages: int = 2
+
+    # Site
     base_url: str = "https://www.flashscore.com"
+
+    # Caching (mount a volume on /app/data in production for persistence)
     hierarchy_cache_path: str = "data/league_hierarchy.json"
     cache_ttl_hours: int = 12
+
+    # IaaS / HTTP server
+    port: int = 8000
+    host: str = "0.0.0.0"
+    log_level: str = "INFO"
 
     # Multi-fallback selectors for auto-adaptation.
     # Order: try first, then next if not found. Prefer role/text based.

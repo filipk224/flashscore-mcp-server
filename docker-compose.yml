@@ -1,0 +1,27 @@
+# Local testing of the IaaS / cloud container configuration
+# Usage:
+#   docker compose up --build
+# Then connect an MCP client to http://localhost:8000/mcp
+
+services:
+  flashscore-mcp:
+    build: .
+    image: flashscore-mcp-server:local
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - FLASHSCORE_HEADLESS=true
+      - FLASHSCORE_MAX_CONCURRENT_PAGES=2
+      - FLASHSCORE_MIN_DELAY_S=1.8
+      - LOG_LEVEL=info
+    volumes:
+      # Persist results cache between container restarts
+      - ./data:/app/data
+    restart: unless-stopped
+    # Optional resource limits (adjust for your machine)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G
