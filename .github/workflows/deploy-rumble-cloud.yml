@@ -89,12 +89,12 @@ jobs:
             fi
 
             DEPLOY_DIR=/opt/flashscore-mcp
-            sudo mkdir -p "$DEPLOY_DIR/data"
+            sudo mkdir -p "$DEPLOY_DIR"
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            echo "=== Write docker-compose.yml (clean via base64) ==="
-            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIGVudmlyb25tZW50OgogICAgICAtIFBPUlQ9ODAwMAogICAgICAtIEhPU1Q9MC4wLjAuMAogICAgICAtIEZMQVNIU0NPUkVfSEVBRExFU1M9dHJ1ZQogICAgICAtIEZMQVNIU0NPUkVfTUFYX0NPTkNVUlJFTlRfUEFHRVM9MgogICAgdm9sdW1lczoKICAgICAgLSAuL2RhdGE6L2FwcC9kYXRhCg==' | base64 -d > docker-compose.yml
+            echo "=== Write docker-compose.yml (no volumes) ==="
+            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIGVudmlyb25tZW50OgogICAgICAtIFBPUlQ9ODAwMAogICAgICAtIEhPU1Q9MC4wLjAuMAogICAgICAtIEZMQVNIU0NPUkVfSEVBRExFU1M9dHJ1ZQogICAgICAtIEZMQVNIU0NPUkVfTUFYX0NPTkNVUlJFTlRfUEFHRVM9Mgo=' | base64 -d > docker-compose.yml
             echo "--- docker-compose.yml content ---"
             cat docker-compose.yml
             echo "--- end ---"
@@ -107,7 +107,7 @@ jobs:
 
             echo "=== Status ==="
             sudo docker compose ps
-            sudo docker compose logs --tail=40 || true
+            sudo docker compose logs --tail=50 || true
             echo "=== Deploy complete ==="
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}

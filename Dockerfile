@@ -28,9 +28,6 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy application source
 COPY --chown=myuser:myuser . .
 
-# Ensure cache directory exists and is writable
-RUN mkdir -p /app/data && chown -R myuser:myuser /app/data
-
 # Expose the HTTP port used by the MCP server
 EXPOSE 8000
 

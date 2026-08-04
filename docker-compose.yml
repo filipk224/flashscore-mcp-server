@@ -16,12 +16,4 @@ services:
       - FLASHSCORE_MAX_CONCURRENT_PAGES=2
       - FLASHSCORE_MIN_DELAY_S=1.8
       - LOG_LEVEL=info
-    volumes:
-      # Persist results cache between container restarts
-      - ./data:/app/data
     restart: unless-stopped
-    # Optional resource limits (adjust for your machine)
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 2G

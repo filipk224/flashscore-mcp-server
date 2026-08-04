@@ -1,13 +1,11 @@
 """Real discovery extractor - top menu sports + left menu countries/leagues.
 Uses multi-fallback selectors for auto-adaptation to slight site changes.
-Caches hierarchy for performance (IaaS friendly).
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import re
-from pathlib import Path
 from typing import List
 from urllib.parse import urljoin, urlparse
 
@@ -35,17 +33,7 @@ KNOWN_SPORTS = [
 
 
 async def list_sports() -> List[Sport]:
-    """Discover sports from top menu / homepage. Falls back to known list + cache."""
-    cache = Path(settings.hierarchy_cache_path)
-    if cache.exists():
-        try:
-            data = json.loads(cache.read_text())
-            if "sports" in data and data["sports"]:
-                logger.info("Loaded {} sports from cache", len(data["sports"]))
-                return [Sport(**s) for s in data["sports"]]
-        except Exception as e:
-            logger.warning("Cache load failed: {}", e)
-
+    """Discover sports from top menu / homepage. Falls back to known list."""
     sports: List[Sport] = []
     async with browser_manager.new_page() as page:
         await safe_goto(page, settings.base_url)
@@ -77,13 +65,6 @@ async def list_sports() -> List[Sport]:
             sports = [Sport(**s) for s in KNOWN_SPORTS]
         else:
             logger.info("Discovered {} sports from page", len(sports))
-
-    # Cache
-    try:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"sports": [s.model_dump() for s in sports]}, indent=2))
-    except Exception as e:
-        logger.warning("Cache write failed: {}", e)
 
     return sports
 

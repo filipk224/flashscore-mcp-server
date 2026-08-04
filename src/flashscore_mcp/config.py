@@ -27,10 +27,6 @@ class Settings(BaseSettings):
     # Site
     base_url: str = "https://www.flashscore.com"
 
-    # Caching (mount a volume on /app/data in production for persistence)
-    hierarchy_cache_path: str = "data/league_hierarchy.json"
-    cache_ttl_hours: int = 12
-
     # IaaS / HTTP server
     port: int = 8000
     host: str = "0.0.0.0"
