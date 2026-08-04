@@ -1,4 +1,4 @@
-# Local testing of the IaaS / cloud container configuration
+# Local testing of the pure IaaS / streamable-HTTP container
 # Usage:
 #   docker compose up --build
 # Then connect an MCP client to http://localhost:8000/mcp

@@ -1,0 +1,30 @@
+# =============================================================================
+# Flashscore MCP Server – Apify Actor Dockerfile
+# =============================================================================
+# Keep this file for Apify uploads / Actor deployments.
+# The main Dockerfile is reserved for pure IaaS streamable-HTTP.
+# =============================================================================
+
+FROM apify/actor-python-playwright:3.12
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    PORT=8000 \
+    HOST=0.0.0.0 \
+    FLASHSCORE_HEADLESS=true \
+    FLASHSCORE_MAX_CONCURRENT_PAGES=2 \
+    FLASHSCORE_MIN_DELAY_S=1.8
+
+WORKDIR /app
+
+COPY --chown=myuser:myuser requirements.txt pyproject.toml ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip list
+
+COPY --chown=myuser:myuser . .
+
+EXPOSE 8000
+
+# Apify entrypoint (src/main.py) – keeps Standby / Actor behaviour
+CMD ["python", "-m", "src.main"]

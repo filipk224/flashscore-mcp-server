@@ -8,7 +8,7 @@
   "meta": {
     "templateId": "python-mcp-empty"
   },
-  "dockerfile": "./Dockerfile",
+  "dockerfile": "./Dockerfile.apify",
   "readme": "./README.md",
   "input": "./.actor/INPUT_SCHEMA.json",
   "usesStandbyMode": true,
