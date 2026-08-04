@@ -112,8 +112,38 @@ jobs:
 
             echo "=== Status ==="
             sudo docker compose ps
-            sudo docker compose logs --tail=50 || true
-            echo "=== Deploy complete ==="
+            sudo docker compose logs --tail=30 || true
+
+            echo "=== Health check (wait for app to bind) ==="
+            sleep 15
+
+            echo "--- docker ps ---"
+            sudo docker ps --filter name=flashscore-mcp
+
+            echo "--- listening on 8000 ---"
+            sudo ss -tlnp | grep 8000 || sudo netstat -tlnp 2>/dev/null | grep 8000 || echo "ss/netstat: nothing on 8000"
+
+            echo "--- local curl /mcp ---"
+            curl -sS -o /tmp/mcp_body.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" --connect-timeout 10 --max-time 30 http://127.0.0.1:8000/mcp || echo "curl_local_failed=$?"
+            head -c 500 /tmp/mcp_body.txt 2>/dev/null || true
+            echo
+
+            echo "--- public IP of this host (for endpoint URL) ---"
+            PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
+            echo "PUBLIC_IP=${PUBLIC_IP}"
+            echo "ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
+
+            echo "--- external-style curl via public IP (from VM) ---"
+            if [ -n "$PUBLIC_IP" ]; then
+              curl -sS -o /tmp/mcp_ext.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" --connect-timeout 10 --max-time 30 "http://${PUBLIC_IP}:8000/mcp" || echo "curl_public_failed=$?"
+              head -c 300 /tmp/mcp_ext.txt 2>/dev/null || true
+              echo
+            fi
+
+            echo "--- recent container logs ---"
+            sudo docker logs --tail=40 flashscore-mcp 2>&1 || true
+
+            echo "=== Deploy + health check complete ==="
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
