@@ -81,6 +81,11 @@ jobs:
             fi
             sudo docker compose version
 
+            echo "=== Free disk space (prune unused Docker data) ==="
+            sudo docker system prune -a -f || true
+            sudo docker builder prune -a -f || true
+            df -h /
+
             echo "=== GHCR login ==="
             if [ -n "${GHCR_TOKEN:-}" ]; then
               echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
