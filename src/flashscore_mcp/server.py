@@ -8,10 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, NewsItem, Season
 from .extractors import discovery, standings, results, fixtures, news, archive
 
-mcp = FastMCP(
-    "flashscore-mcp",
-    description="Private production Flashscore sports data MCP (adaptable, cached history, Apify/IaaS ready)",
-)
+mcp = FastMCP("flashscore-mcp")
 
 
 @mcp.tool()
