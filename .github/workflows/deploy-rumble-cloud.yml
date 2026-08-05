@@ -150,7 +150,7 @@ jobs:
             sudo docker compose logs --tail=50 || true
 
             echo "=== Health check (wait for bind) ==="
-            sleep 25
+            sleep 30
 
             echo "--- docker ps -a ---"
             sudo docker ps -a --filter name=flashscore-mcp
@@ -165,7 +165,17 @@ jobs:
             echo "--- TCP connect ---"
             python3 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',8000)); print('TCP_OK'); s.close()" 2>&1 || echo "TCP_FAIL"
 
-            echo "--- MCP initialize POST (Streamable HTTP) ---"
+            echo "--- GET /health ---"
+            curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              http://127.0.0.1:8000/health || echo "health_failed=$?"
+            echo
+
+            echo "--- GET / ---"
+            curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              http://127.0.0.1:8000/ || echo "root_failed=$?"
+            echo
+
+            echo "--- MCP initialize POST (Streamable HTTP, local) ---"
             curl -sS -D /tmp/mcp_headers.txt -o /tmp/mcp_body.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" \
               --connect-timeout 10 --max-time 30 \
               -X POST http://127.0.0.1:8000/mcp \
@@ -173,16 +183,38 @@ jobs:
               -H "Accept: application/json, text/event-stream" \
               -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
               || echo "curl_local_failed=$?"
-            head -c 800 /tmp/mcp_headers.txt 2>/dev/null || true
+            echo "=== response headers ==="
+            head -c 1000 /tmp/mcp_headers.txt 2>/dev/null || true
             echo
-            head -c 600 /tmp/mcp_body.txt 2>/dev/null || true
+            echo "=== response body ==="
+            head -c 800 /tmp/mcp_body.txt 2>/dev/null || true
             echo
+
+            # Optional: tools/list if initialize succeeded (stateless so no session needed)
+            if grep -q '"result"' /tmp/mcp_body.txt 2>/dev/null; then
+              echo "--- MCP tools/list (stateless) ---"
+              curl -sS -o /tmp/mcp_tools.txt -w "HTTP_CODE=%{http_code}\n" \
+                --connect-timeout 10 --max-time 30 \
+                -X POST http://127.0.0.1:8000/mcp \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json, text/event-stream" \
+                -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' || true
+              head -c 600 /tmp/mcp_tools.txt 2>/dev/null || true
+              echo
+            fi
 
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
             echo "PUBLIC_IP=${PUBLIC_IP}"
-            echo "ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
+            echo "HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
+            echo "NOTE: Grok and many remote MCP clients require HTTPS. Plain HTTP may be rejected."
+            echo "      Use a tunnel (ngrok / Cloudflare) or reverse-proxy TLS in front of port 8000."
 
             if [ -n "$PUBLIC_IP" ]; then
+              echo "--- external GET /health ---"
+              curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+                "http://${PUBLIC_IP}:8000/health" || echo "ext_health_failed=$?"
+              echo
+
               echo "--- external MCP initialize ---"
               curl -sS -D /tmp/mcp_ext_h.txt -o /tmp/mcp_ext.txt -w "HTTP_CODE=%{http_code}\n" \
                 --connect-timeout 10 --max-time 30 \
@@ -191,14 +223,14 @@ jobs:
                 -H "Accept: application/json, text/event-stream" \
                 -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck-ext","version":"1.0"}}}' \
                 || echo "curl_public_failed=$?"
-              head -c 400 /tmp/mcp_ext_h.txt 2>/dev/null || true
+              head -c 500 /tmp/mcp_ext_h.txt 2>/dev/null || true
               echo
-              head -c 400 /tmp/mcp_ext.txt 2>/dev/null || true
+              head -c 500 /tmp/mcp_ext.txt 2>/dev/null || true
               echo
             fi
 
-            echo "--- container logs ---"
-            sudo docker logs --tail=80 flashscore-mcp 2>&1 || true
+            echo "--- container logs (last 100 lines) ---"
+            sudo docker logs --tail=100 flashscore-mcp 2>&1 || true
 
             echo "=== Deploy complete ==="
         env:
