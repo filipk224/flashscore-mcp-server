@@ -9,6 +9,11 @@ Configured for maximum client compatibility (Grok, Claude, Cursor, etc.):
 - stateless_http=True  (no sticky session required)
 - json_response=True   (direct JSON instead of mandatory SSE)
 - CORS exposing Mcp-Session-Id so browser-based / proxy clients work
+
+Note for Grok / xAI remote MCP:
+  Grok prefers (and many remote clients require) HTTPS endpoints.
+  Plain http://PUBLIC_IP:8000/mcp may be rejected. Use a TLS reverse proxy
+  (Caddy, nginx, Cloudflare Tunnel, ngrok) or a platform that provides HTTPS.
 """
 
 from __future__ import annotations
@@ -25,10 +30,36 @@ import uvicorn
 from loguru import logger
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Route
 
 from flashscore_mcp import __version__
 from flashscore_mcp.config import settings
 from flashscore_mcp.server import mcp
+
+
+async def health(request: Request) -> JSONResponse:
+    """Simple liveness / readiness probe used by deploy healthchecks and external monitors."""
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "flashscore-mcp",
+            "version": __version__,
+            "mcp_endpoint": "/mcp",
+            "transport": "streamable-http",
+            "stateless_http": True,
+            "json_response": True,
+        }
+    )
+
+
+async def root(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(
+        f"Flashscore MCP Server v{__version__}\n"
+        "MCP endpoint: POST /mcp  (Streamable HTTP, stateless + JSON)\n"
+        "Health: GET /health\n"
+    )
 
 
 def main() -> None:
@@ -43,6 +74,9 @@ def main() -> None:
         port,
     )
     logger.info("MCP endpoint will be available at http://{}:{}/mcp", host, port)
+    logger.info(
+        "Grok / remote clients: prefer HTTPS. If using plain HTTP IP, connection may be rejected by the client."
+    )
 
     # Build the Streamable HTTP ASGI application from FastMCP.
     # stateless_http + json_response maximises compatibility with remote clients
@@ -74,6 +108,16 @@ def main() -> None:
             )
         ],
     )
+
+    # Add lightweight health and root routes so external monitors and deploy
+    # scripts can verify the process is alive without speaking full MCP.
+    # FastMCP's http_app is a Starlette app; we prepend our routes.
+    extra_routes = [
+        Route("/", root, methods=["GET"]),
+        Route("/health", health, methods=["GET"]),
+    ]
+    # Insert at the beginning so they take precedence over any catch-all.
+    app.routes = extra_routes + list(app.routes)
 
     config = uvicorn.Config(
         app,
