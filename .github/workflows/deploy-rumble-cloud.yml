@@ -83,17 +83,38 @@ jobs:
             fi
             sudo docker compose version
 
+            echo "=== Docker storage / userns diagnostics ==="
+            # Kernel message "overlayfs: idmapped layers are not supported" is often a
+            # non-fatal warning when containerd tries idmapped mounts on kernels that
+            # lack full support. Force classic docker without userns-remap.
+            sudo mkdir -p /etc/docker
+            if [ -f /etc/docker/daemon.json ]; then
+              echo "--- existing /etc/docker/daemon.json ---"
+              cat /etc/docker/daemon.json || true
+            fi
+            # Write a safe daemon config: no userns-remap, explicit overlay2
+            sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+            {
+              "storage-driver": "overlay2",
+              "log-driver": "json-file",
+              "log-opts": { "max-size": "10m", "max-file": "3" }
+            }
+            EOF
+            echo "--- new /etc/docker/daemon.json ---"
+            cat /etc/docker/daemon.json
+            sudo systemctl restart docker || true
+            sleep 3
+            sudo docker info 2>/dev/null | egrep -i 'Storage Driver|Backing Filesystem|Security Options|User Namespaces|Server Version|Operating System|Kernel Version' || sudo docker info | head -40
+
             echo "=== Open host firewall for TCP 8000 (ufw / iptables) ==="
             if command -v ufw >/dev/null 2>&1; then
               sudo ufw allow 8000/tcp || true
               sudo ufw status || true
             fi
-            # Always ensure iptables ACCEPT for 8000 (covers non-ufw hosts)
             sudo iptables -C INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null || \
               sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT || true
-            sudo iptables -L INPUT -n | head -20 || true
 
-            echo "=== Free disk space (prune unused Docker data) ==="
+            echo "=== Free disk space ==="
             sudo docker system prune -a -f || true
             sudo docker builder prune -a -f || true
             df -h /
@@ -110,40 +131,35 @@ jobs:
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            echo "=== Write docker-compose.yml (no volumes) ==="
-            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIGVudmlyb25tZW50OgogICAgICAtIFBPUlQ9ODAwMAogICAgICAtIEhPU1Q9MC4wLjAuMAogICAgICAtIEZMQVNIU0NPUkVfSEVBRExFU1M9dHJ1ZQogICAgICAtIEZMQVNIU0NPUkVfTUFYX0NPTkNVUlJFTlRfUEFHRVM9MgogICAgICAtIExPR19MRVZFTD1pbmZvCiAgICAgIC0gRkFTVE1DUF9IT1NUPTAuMC4wLjAKICAgICAgLSBGQVNUTUNQX1BPUlQ9ODAwMAo=' | base64 -d > docker-compose.yml
-            echo "--- docker-compose.yml content ---"
+            echo "=== Write docker-compose.yml (shm for Playwright, no volumes) ==="
+            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCg==' | base64 -d > docker-compose.yml
             cat docker-compose.yml
-            echo "--- end ---"
 
-            echo "=== Pull image ==="
+            echo "=== Pull + start ==="
             sudo docker compose pull
-
-            echo "=== Start container ==="
             sudo docker compose up -d --force-recreate --remove-orphans
 
             echo "=== Status ==="
             sudo docker compose ps
-            sudo docker compose logs --tail=40 || true
+            sudo docker compose logs --tail=50 || true
 
-            echo "=== Health check (wait for app to bind) ==="
-            sleep 20
+            echo "=== Health check (wait for bind) ==="
+            sleep 25
 
-            echo "--- docker ps ---"
+            echo "--- docker ps -a ---"
             sudo docker ps -a --filter name=flashscore-mcp
 
-            echo "--- container inspect (State / Ports) ---"
-            sudo docker inspect flashscore-mcp --format 'Status={{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} OOM={{.State.OOMKilled}}' 2>/dev/null || true
+            echo "--- inspect ---"
+            sudo docker inspect flashscore-mcp --format 'Status={{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} OOM={{.State.OOMKilled}} Started={{.State.StartedAt}}' 2>/dev/null || true
             sudo docker port flashscore-mcp 2>/dev/null || true
 
             echo "--- listening on 8000 ---"
-            sudo ss -tlnp | grep 8000 || sudo netstat -tlnp 2>/dev/null | grep 8000 || echo "ss/netstat: nothing on 8000"
+            sudo ss -tlnp | grep 8000 || echo "nothing on 8000"
 
-            echo "--- local TCP connect test ---"
+            echo "--- TCP connect ---"
             python3 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',8000)); print('TCP_OK'); s.close()" 2>&1 || echo "TCP_FAIL"
 
-            echo "--- local MCP initialize (Streamable HTTP) ---"
-            # Plain GET is NOT valid for Streamable HTTP. Must POST initialize with correct Accept.
+            echo "--- MCP initialize POST (Streamable HTTP) ---"
             curl -sS -D /tmp/mcp_headers.txt -o /tmp/mcp_body.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" \
               --connect-timeout 10 --max-time 30 \
               -X POST http://127.0.0.1:8000/mcp \
@@ -151,23 +167,18 @@ jobs:
               -H "Accept: application/json, text/event-stream" \
               -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
               || echo "curl_local_failed=$?"
-            echo "--- response headers ---"
             head -c 800 /tmp/mcp_headers.txt 2>/dev/null || true
             echo
-            echo "--- response body (first 600 chars) ---"
             head -c 600 /tmp/mcp_body.txt 2>/dev/null || true
             echo
 
-            echo "--- public IP of this host (for endpoint URL) ---"
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
             echo "PUBLIC_IP=${PUBLIC_IP}"
             echo "ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
-            echo "NOTE: Streamable HTTP requires POST with Accept: application/json, text/event-stream"
-            echo "      Browser GET / curl without headers will look like a failure."
 
-            echo "--- external-style MCP initialize via public IP (from VM) ---"
             if [ -n "$PUBLIC_IP" ]; then
-              curl -sS -D /tmp/mcp_ext_h.txt -o /tmp/mcp_ext.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" \
+              echo "--- external MCP initialize ---"
+              curl -sS -D /tmp/mcp_ext_h.txt -o /tmp/mcp_ext.txt -w "HTTP_CODE=%{http_code}\n" \
                 --connect-timeout 10 --max-time 30 \
                 -X POST "http://${PUBLIC_IP}:8000/mcp" \
                 -H "Content-Type: application/json" \
@@ -180,10 +191,13 @@ jobs:
               echo
             fi
 
-            echo "--- recent container logs ---"
-            sudo docker logs --tail=60 flashscore-mcp 2>&1 || true
+            echo "--- kernel overlayfs messages (info only) ---"
+            sudo dmesg 2>/dev/null | grep -i 'overlayfs\|idmapped' | tail -10 || true
 
-            echo "=== Deploy + health check complete ==="
+            echo "--- container logs ---"
+            sudo docker logs --tail=80 flashscore-mcp 2>&1 || true
+
+            echo "=== Deploy complete ==="
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
