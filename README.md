@@ -143,7 +143,36 @@ The project remains fully compatible with Apify Actors.
 3. Enable Standby in the Actor settings
 4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with Apify token)
 
+
 ---
+
+## 5. Connecting from Grok (xAI)
+
+Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint in most cases. A plain `http://PUBLIC_IP:8000/mcp` URL is frequently rejected.
+
+Recommended options:
+
+1. **Cloudflare Tunnel or ngrok** (fastest for testing)  
+   On the VM (or any machine that can reach the container):
+   ```bash
+   # Cloudflare quick tunnel (no account required for temporary URL)
+   cloudflared tunnel --url http://127.0.0.1:8000
+   # Use the https://*.trycloudflare.com URL that is printed as the Grok connector URL
+   ```
+   Or with ngrok: `ngrok http 8000` and use the `https://...ngrok-free.app` URL.
+
+2. **TLS reverse proxy** (Caddy / nginx) in front of the container if you have a domain pointed at the Rumble IP.
+
+3. **Apify Standby** path (already HTTPS) if you prefer the Apify deployment.
+
+The server itself is already configured with:
+- `stateless_http=True`
+- `json_response=True`
+- CORS that exposes `Mcp-Session-Id`
+
+These settings maximise compatibility with Grok, Claude, Cursor and other remote clients.
+
+After a successful deploy the workflow prints the current `PUBLIC_IP` and a clear note about the HTTPS requirement. Check the GitHub Actions log for the latest run.
 
 ## Project Structure
 ```
