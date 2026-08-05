@@ -114,9 +114,7 @@ jobs:
             sudo iptables -C INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null || \
               sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT || true
 
-            echo "=== Free disk space ==="
-            sudo docker system prune -a -f || true
-            sudo docker builder prune -a -f || true
+            echo "=== Disk space (no prune — IaaS-only image) ==="
             df -h /
 
             echo "=== GHCR login ==="
