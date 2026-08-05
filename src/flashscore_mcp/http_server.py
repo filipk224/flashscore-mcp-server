@@ -30,36 +30,10 @@ import uvicorn
 from loguru import logger
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
-from starlette.routing import Route
 
 from flashscore_mcp import __version__
 from flashscore_mcp.config import settings
 from flashscore_mcp.server import mcp
-
-
-async def health(request: Request) -> JSONResponse:
-    """Simple liveness / readiness probe used by deploy healthchecks and external monitors."""
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "flashscore-mcp",
-            "version": __version__,
-            "mcp_endpoint": "/mcp",
-            "transport": "streamable-http",
-            "stateless_http": True,
-            "json_response": True,
-        }
-    )
-
-
-async def root(request: Request) -> PlainTextResponse:
-    return PlainTextResponse(
-        f"Flashscore MCP Server v{__version__}\n"
-        "MCP endpoint: POST /mcp  (Streamable HTTP, stateless + JSON)\n"
-        "Health: GET /health\n"
-    )
 
 
 def main() -> None:
@@ -79,9 +53,10 @@ def main() -> None:
     )
 
     # Build the Streamable HTTP ASGI application from FastMCP.
-    # stateless_http + json_response maximises compatibility with remote clients
-    # (Grok, Claude, Cursor, mcp-remote, etc.) that do not require long-lived
-    # SSE sessions or sticky load-balancer affinity.
+    # Health (/health) and root (/) routes are registered via @mcp.custom_route
+    # on the shared mcp instance (see server.py). Do NOT assign to app.routes
+    # — FastMCP's Starlette app makes that attribute read-only / property-backed
+    # and previously caused AttributeError crash-loops on the Rumble VM.
     app = mcp.http_app(
         transport="streamable-http",
         stateless_http=True,
@@ -108,16 +83,6 @@ def main() -> None:
             )
         ],
     )
-
-    # Add lightweight health and root routes so external monitors and deploy
-    # scripts can verify the process is alive without speaking full MCP.
-    # FastMCP's http_app is a Starlette app; we prepend our routes.
-    extra_routes = [
-        Route("/", root, methods=["GET"]),
-        Route("/health", health, methods=["GET"]),
-    ]
-    # Insert at the beginning so they take precedence over any catch-all.
-    app.routes = extra_routes + list(app.routes)
 
     config = uvicorn.Config(
         app,
