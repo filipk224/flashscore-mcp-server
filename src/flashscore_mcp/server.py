@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import List, Optional
 from loguru import logger
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, NewsItem, Season
 from .extractors import discovery, standings, results, fixtures, news, archive
 
