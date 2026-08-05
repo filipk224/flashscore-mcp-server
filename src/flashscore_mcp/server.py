@@ -8,6 +8,8 @@ from fastmcp import FastMCP
 from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, NewsItem, Season
 from .extractors import discovery, standings, results, fixtures, news, archive
 
+# Create the FastMCP instance. Stateless + JSON response defaults are applied
+# at the http_app() call site so both stdio and HTTP entrypoints remain valid.
 mcp = FastMCP("flashscore-mcp")
 
 
