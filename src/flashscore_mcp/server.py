@@ -3,14 +3,44 @@
 from __future__ import annotations
 import asyncio
 from typing import List, Optional
+
 from loguru import logger
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
+
 from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, NewsItem, Season
 from .extractors import discovery, standings, results, fixtures, news, archive
+from . import __version__
 
 # Create the FastMCP instance. Stateless + JSON response defaults are applied
 # at the http_app() call site so both stdio and HTTP entrypoints remain valid.
 mcp = FastMCP("flashscore-mcp")
+
+
+@mcp.custom_route("/", methods=["GET"])
+async def root(request: Request) -> PlainTextResponse:
+    return PlainTextResponse(
+        f"Flashscore MCP Server v{__version__}\n"
+        "MCP endpoint: POST /mcp  (Streamable HTTP, stateless + JSON)\n"
+        "Health: GET /health\n"
+    )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    """Simple liveness / readiness probe used by deploy healthchecks and external monitors."""
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "flashscore-mcp",
+            "version": __version__,
+            "mcp_endpoint": "/mcp",
+            "transport": "streamable-http",
+            "stateless_http": True,
+            "json_response": True,
+        }
+    )
 
 
 @mcp.tool()
@@ -87,7 +117,7 @@ async def get_historical_results(league: str, season: str, limit: Optional[int] 
 
 
 async def main() -> None:
-    logger.info("Starting private Flashscore MCP Server v{} (Apify + IaaS + local ready)", __import__("flashscore_mcp").__version__)
+    logger.info("Starting private Flashscore MCP Server v{} (Apify + IaaS + local ready)", __version__)
     await mcp.run_stdio_async()
 
 
