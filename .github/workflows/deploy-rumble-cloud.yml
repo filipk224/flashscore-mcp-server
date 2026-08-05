@@ -72,9 +72,41 @@ jobs:
               echo "Installing Docker..."
               curl -fsSL https://get.docker.com | sudo sh
               sudo systemctl enable --now docker || true
-              sleep 3
+              sleep 5
             fi
             sudo docker --version
+
+            echo "=== Ensure Docker daemon is running ==="
+            # Previous deploys rewrote daemon.json with indented JSON and forced
+            # storage-driver changes, which can leave dockerd dead. Recover gently.
+            if [ -f /etc/docker/daemon.json ]; then
+              echo "--- current /etc/docker/daemon.json ---"; cat /etc/docker/daemon.json || true
+              # If file is invalid JSON, remove it so dockerd can start with defaults
+              if ! python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" 2>/dev/null; then
+                echo "daemon.json is invalid JSON — removing so Docker can start"
+                sudo mv /etc/docker/daemon.json /etc/docker/daemon.json.bad.$(date +%s) || true
+              fi
+            fi
+
+            sudo systemctl enable docker 2>/dev/null || true
+            sudo systemctl start docker 2>/dev/null || true
+            # Wait up to ~45s for the socket
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+              if sudo docker info >/dev/null 2>&1; then
+                echo "Docker daemon is up (attempt $i)"
+                break
+              fi
+              echo "Waiting for Docker daemon... ($i)"
+              sudo systemctl start docker 2>/dev/null || true
+              sleep 3
+            done
+            if ! sudo docker info >/dev/null 2>&1; then
+              echo "ERROR: Docker daemon still not reachable"
+              sudo systemctl status docker --no-pager || true
+              sudo journalctl -u docker --no-pager -n 40 || true
+              exit 1
+            fi
+            sudo docker info 2>/dev/null | egrep -i 'Storage Driver|Backing Filesystem|Server Version|Operating System|Kernel Version' || true
 
             echo "=== Ensure compose plugin ==="
             if ! sudo docker compose version >/dev/null 2>&1; then
@@ -83,38 +115,14 @@ jobs:
             fi
             sudo docker compose version
 
-            echo "=== Docker storage / userns diagnostics ==="
-            # Kernel message "overlayfs: idmapped layers are not supported" is often a
-            # non-fatal warning when containerd tries idmapped mounts on kernels that
-            # lack full support. Force classic docker without userns-remap.
-            sudo mkdir -p /etc/docker
-            if [ -f /etc/docker/daemon.json ]; then
-              echo "--- existing /etc/docker/daemon.json ---"
-              cat /etc/docker/daemon.json || true
-            fi
-            # Write a safe daemon config: no userns-remap, explicit overlay2
-            sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-            {
-              "storage-driver": "overlay2",
-              "log-driver": "json-file",
-              "log-opts": { "max-size": "10m", "max-file": "3" }
-            }
-            EOF
-            echo "--- new /etc/docker/daemon.json ---"
-            cat /etc/docker/daemon.json
-            sudo systemctl restart docker || true
-            sleep 3
-            sudo docker info 2>/dev/null | egrep -i 'Storage Driver|Backing Filesystem|Security Options|User Namespaces|Server Version|Operating System|Kernel Version' || sudo docker info | head -40
-
-            echo "=== Open host firewall for TCP 8000 (ufw / iptables) ==="
+            echo "=== Open host firewall for TCP 8000 ==="
             if command -v ufw >/dev/null 2>&1; then
               sudo ufw allow 8000/tcp || true
-              sudo ufw status || true
             fi
             sudo iptables -C INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null || \
               sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT || true
 
-            echo "=== Disk space (no prune — IaaS-only image) ==="
+            echo "=== Disk space ==="
             df -h /
 
             echo "=== GHCR login ==="
@@ -129,7 +137,7 @@ jobs:
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            echo "=== Write docker-compose.yml (shm for Playwright, no volumes) ==="
+            echo "=== Write docker-compose.yml ==="
             echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCg==' | base64 -d > docker-compose.yml
             cat docker-compose.yml
 
@@ -188,9 +196,6 @@ jobs:
               head -c 400 /tmp/mcp_ext.txt 2>/dev/null || true
               echo
             fi
-
-            echo "--- kernel overlayfs messages (info only) ---"
-            sudo dmesg 2>/dev/null | grep -i 'overlayfs\|idmapped' | tail -10 || true
 
             echo "--- container logs ---"
             sudo docker logs --tail=80 flashscore-mcp 2>&1 || true
