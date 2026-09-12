@@ -63,7 +63,7 @@ jobs:
           key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
           port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
           script_stop: true
-          envs: GHCR_TOKEN,GITHUB_ACTOR
+          envs: GHCR_TOKEN,GITHUB_ACTOR,CLOUDFLARE_TUNNEL_TOKEN
           script: |
             set -e
 
@@ -77,11 +77,8 @@ jobs:
             sudo docker --version
 
             echo "=== Ensure Docker daemon is running ==="
-            # Previous deploys rewrote daemon.json with indented JSON and forced
-            # storage-driver changes, which can leave dockerd dead. Recover gently.
             if [ -f /etc/docker/daemon.json ]; then
               echo "--- current /etc/docker/daemon.json ---"; cat /etc/docker/daemon.json || true
-              # If file is invalid JSON, remove it so dockerd can start with defaults
               if ! python3 -c "import json; json.load(open('/etc/docker/daemon.json'))" 2>/dev/null; then
                 echo "daemon.json is invalid JSON — removing so Docker can start"
                 sudo mv /etc/docker/daemon.json /etc/docker/daemon.json.bad.$(date +%s) || true
@@ -90,7 +87,6 @@ jobs:
 
             sudo systemctl enable docker 2>/dev/null || true
             sudo systemctl start docker 2>/dev/null || true
-            # Wait up to ~45s for the socket
             for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
               if sudo docker info >/dev/null 2>&1; then
                 echo "Docker daemon is up (attempt $i)"
@@ -137,17 +133,29 @@ jobs:
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
+            echo "=== Write .env (tunnel token if present) ==="
+            umask 077
+            : > .env
+            if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+              printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > .env
+              echo "CLOUDFLARE_TUNNEL_TOKEN is set (length=${#CLOUDFLARE_TUNNEL_TOKEN})"
+              COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCiAgY2xvdWRmbGFyZWQ6CiAgICBpbWFnZTogY2xvdWRmbGFyZS9jbG91ZGZsYXJlZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBmbGFzaHNjb3JlLW1jcC10dW5uZWwKICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBjb21tYW5kOiB0dW5uZWwgLS1uby1hdXRvdXBkYXRlIHJ1biAtLXRva2VuICR7Q0xPVURGTEFSRV9UVU5ORUxfVE9LRU59CiAgICBkZXBlbmRzX29uOgogICAgICAtIGZsYXNoc2NvcmUtbWNwCg=='
+            else
+              echo "CLOUDFLARE_TUNNEL_TOKEN not set — deploying MCP only (no tunnel)"
+              COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCg=='
+            fi
+
             echo "=== Write docker-compose.yml ==="
-            echo 'c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCg==' | base64 -d > docker-compose.yml
+            echo "$COMPOSE_B64" | base64 -d > docker-compose.yml
             cat docker-compose.yml
 
             echo "=== Pull + start ==="
-            sudo docker compose pull
-            sudo docker compose up -d --force-recreate --remove-orphans
+            sudo docker compose --env-file .env pull
+            sudo docker compose --env-file .env up -d --force-recreate --remove-orphans
 
             echo "=== Status ==="
-            sudo docker compose ps
-            sudo docker compose logs --tail=50 || true
+            sudo docker compose --env-file .env ps
+            sudo docker compose --env-file .env logs --tail=50 || true
 
             echo "=== Health check (wait for bind) ==="
             sleep 30
@@ -190,7 +198,6 @@ jobs:
             head -c 800 /tmp/mcp_body.txt 2>/dev/null || true
             echo
 
-            # Optional: tools/list if initialize succeeded (stateless so no session needed)
             if grep -q '"result"' /tmp/mcp_body.txt 2>/dev/null; then
               echo "--- MCP tools/list (stateless) ---"
               curl -sS -o /tmp/mcp_tools.txt -w "HTTP_CODE=%{http_code}\n" \
@@ -203,36 +210,41 @@ jobs:
               echo
             fi
 
+            echo "=== Cloudflare Tunnel ==="
+            if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+              echo "--- tunnel container ---"
+              sudo docker ps -a --filter name=flashscore-mcp-tunnel
+              echo "--- tunnel logs ---"
+              sudo docker logs --tail=80 flashscore-mcp-tunnel 2>&1 || true
+              if sudo docker inspect flashscore-mcp-tunnel --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+                echo "TUNNEL_CONTAINER=running"
+              else
+                echo "TUNNEL_CONTAINER=not_running"
+              fi
+              echo "Configure public hostname in Cloudflare Zero Trust → Networks → Tunnels:"
+              echo "  Service URL: http://flashscore-mcp:8000"
+              echo "  Client path: https://<your-hostname>/mcp"
+            else
+              echo "Tunnel skipped (no CLOUDFLARE_TUNNEL_TOKEN secret)."
+            fi
+
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
             echo "PUBLIC_IP=${PUBLIC_IP}"
             echo "HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
-            echo "NOTE: Grok and many remote MCP clients require HTTPS. Plain HTTP may be rejected."
-            echo "      Use a tunnel (ngrok / Cloudflare) or reverse-proxy TLS in front of port 8000."
+            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use the Cloudflare hostname."
 
             if [ -n "$PUBLIC_IP" ]; then
               echo "--- external GET /health ---"
               curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
                 "http://${PUBLIC_IP}:8000/health" || echo "ext_health_failed=$?"
               echo
-
-              echo "--- external MCP initialize ---"
-              curl -sS -D /tmp/mcp_ext_h.txt -o /tmp/mcp_ext.txt -w "HTTP_CODE=%{http_code}\n" \
-                --connect-timeout 10 --max-time 30 \
-                -X POST "http://${PUBLIC_IP}:8000/mcp" \
-                -H "Content-Type: application/json" \
-                -H "Accept: application/json, text/event-stream" \
-                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck-ext","version":"1.0"}}}' \
-                || echo "curl_public_failed=$?"
-              head -c 500 /tmp/mcp_ext_h.txt 2>/dev/null || true
-              echo
-              head -c 500 /tmp/mcp_ext.txt 2>/dev/null || true
-              echo
             fi
 
-            echo "--- container logs (last 100 lines) ---"
+            echo "--- MCP container logs (last 100 lines) ---"
             sudo docker logs --tail=100 flashscore-mcp 2>&1 || true
 
             echo "=== Deploy complete ==="
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
