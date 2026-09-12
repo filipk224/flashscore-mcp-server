@@ -1,14 +1,21 @@
-# Local testing of the pure IaaS / streamable-HTTP container
+# Local testing of the IaaS / streamable-HTTP container
 # Usage:
 #   docker compose up --build
-# Then connect an MCP client to http://localhost:8000/mcp
+# MCP: http://localhost:8000/mcp
+#
+# Optional Cloudflare Tunnel (remotely-managed):
+#   export CLOUDFLARE_TUNNEL_TOKEN=eyJ...
+#   docker compose --profile tunnel up --build
+# Dashboard public hostname must target http://flashscore-mcp:8000
 
 services:
   flashscore-mcp:
     build: .
     image: flashscore-mcp-server:local
+    container_name: flashscore-mcp
     ports:
       - "8000:8000"
+    shm_size: "1gb"
     environment:
       - PORT=8000
       - HOST=0.0.0.0
@@ -17,3 +24,12 @@ services:
       - FLASHSCORE_MIN_DELAY_S=1.8
       - LOG_LEVEL=info
     restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: flashscore-mcp-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - flashscore-mcp
