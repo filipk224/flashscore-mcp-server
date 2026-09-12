@@ -7,6 +7,7 @@ Supports:
 - **Apify Actor** (Standby + Streamable HTTP)
 - **General IaaS / cloud** (Railway, Fly.io, Render, DigitalOcean, AWS, Cloud Run, etc.)
 - **Rumble Cloud** (automated deploy via GitHub Actions on every push to `main`)
+- **Cloudflare Tunnel** (`cloudflared` sidecar) for HTTPS in front of the private/public VM
 
 ## Features
 - Sports discovery via top menu
@@ -52,7 +53,7 @@ The project is prepared for any Docker-compatible IaaS platform.
 ### Key files
 - `Dockerfile` – production image (Playwright browsers pre-installed)
 - `src/flashscore_mcp/http_server.py` – generic Streamable HTTP entrypoint
-- `docker-compose.yml` – local container testing
+- `docker-compose.yml` – local container testing (+ optional `tunnel` profile)
 - `.env.example` – environment variable reference
 
 ### Build & run locally with Docker
@@ -66,7 +67,6 @@ docker compose up --build
 **Railway / Render / Fly.io / DigitalOcean / AWS / Cloud Run**
 - Connect the repository; the Dockerfile is auto-detected on most platforms.
 - Set environment variables from `.env.example`.
-- Mount a persistent volume at `/app/data` for the results cache.
 
 ---
 
@@ -79,8 +79,9 @@ On every push to `main` (or manual run) it:
 1. Builds the image and pushes to `ghcr.io/filipk224/flashscore-mcp-server:latest`
 2. SSHs into the Rumble Cloud VM
 3. **Installs Docker automatically if it is not present**
-4. Creates `/opt/flashscore-mcp/docker-compose.yml` if missing
-5. Pulls the image and starts/recreates the container
+4. Writes `/opt/flashscore-mcp/docker-compose.yml` and `.env`
+5. Pulls the image and starts/recreates the MCP container
+6. If `CLOUDFLARE_TUNNEL_TOKEN` is set, starts `cloudflare/cloudflared` as a sidecar
 
 ### One-time GitHub setup
 
@@ -93,6 +94,9 @@ On every push to `main` (or manual run) it:
 | `RUMBLE_SSH_PRIVATE_KEY` | Yes | Full private key (PEM) |
 | `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
 | `GHCR_PULL_TOKEN` | No | Only needed if the GHCR package stays **private**. A classic PAT with `read:packages` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | No* | Remotely-managed tunnel token (`eyJ...`). Required to start `cloudflared` on the VM |
+
+\*Without this secret the MCP container still deploys; there is no HTTPS hostname.
 
 **Variable** (Settings → Secrets and variables → Actions → Variables):
 
@@ -100,33 +104,39 @@ On every push to `main` (or manual run) it:
 |----------|-------|
 | `ENABLE_RUMBLE_DEPLOY` | `true` |
 
-### GHCR package visibility (important without a pull token)
+### One-time Cloudflare Tunnel setup
+
+1. Cloudflare dashboard → **Zero Trust** (or **Networking**) → **Tunnels** → Create a remotely-managed tunnel (Cloudflared).
+2. Copy the install token (`eyJ...`). Store it as GitHub secret `CLOUDFLARE_TUNNEL_TOKEN`.
+3. Add a **public hostname** on that tunnel:
+   - Subdomain + your zone (e.g. `flashscore-mcp.example.com`)
+   - Type: HTTP
+   - URL: `http://flashscore-mcp:8000`  
+     (compose service name on the Docker network — not the public IP)
+4. Push to `main` or run the workflow. Logs should show `flashscore-mcp-tunnel` running and a registered connector.
+5. MCP / Grok URL: `https://flashscore-mcp.example.com/mcp`
+
+The VM does **not** need inbound 8000 from the internet for the tunnel path. Keep SSH reachable for deploys.
+
+### GHCR package visibility
 
 Rumble Cloud VMs have no built-in “pull token”. Options:
 
 1. **Recommended without a PAT**: make the package public  
-   GitHub → your profile → Packages → `flashscore-mcp-server` → Package settings → Change visibility → Public.  
-   Then the VM can `docker pull` without login.
-
-2. **Keep private**: create a classic Personal Access Token with `read:packages`, store it as secret `GHCR_PULL_TOKEN`. The workflow will log the VM into GHCR with it.
-
-### One-time VM notes
-
-- Open **port 8000** in the Rumble Cloud security group / firewall for the VM.
-- Prefer ≥ 2 GB RAM (Playwright + Chromium).
-- You do **not** need to install Docker yourself; the deploy script does it on first run if missing.
-- You do **not** need to create `docker-compose.yml` yourself; the script creates it under `/opt/flashscore-mcp` if absent.
+   GitHub → Packages → `flashscore-mcp-server` → Package settings → Public.
+2. **Keep private**: classic PAT with `read:packages` as `GHCR_PULL_TOKEN`.
 
 ### Verify after deploy
 
 On the VM:
 ```bash
 cd /opt/flashscore-mcp
-sudo docker compose ps
-sudo docker compose logs -f --tail=100
+sudo docker compose --env-file .env ps
+sudo docker compose --env-file .env logs -f --tail=100
 ```
 
-MCP endpoint: `http://<VM-IP-or-domain>:8000/mcp`
+Local: `http://127.0.0.1:8000/mcp`  
+Public HTTPS: `https://<cloudflare-hostname>/mcp`
 
 ---
 
@@ -143,41 +153,18 @@ The project remains fully compatible with Apify Actors.
 3. Enable Standby in the Actor settings
 4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with Apify token)
 
-
 ---
 
 ## 5. Connecting from Grok (xAI)
 
-Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint in most cases. A plain `http://PUBLIC_IP:8000/mcp` URL is frequently rejected.
+Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint. Use the Cloudflare hostname from section 3.
 
-Recommended options:
-
-1. **Cloudflare Tunnel or ngrok** (fastest for testing)  
-   On the VM (or any machine that can reach the container):
-   ```bash
-   # Cloudflare quick tunnel (no account required for temporary URL)
-   cloudflared tunnel --url http://127.0.0.1:8000
-   # Use the https://*.trycloudflare.com URL that is printed as the Grok connector URL
-   ```
-   Or with ngrok: `ngrok http 8000` and use the `https://...ngrok-free.app` URL.
-
-2. **TLS reverse proxy** (Caddy / nginx) in front of the container if you have a domain pointed at the Rumble IP.
-
-3. **Apify Standby** path (already HTTPS) if you prefer the Apify deployment.
-
-The server itself is already configured with:
-- `stateless_http=True`
-- `json_response=True`
-- CORS that exposes `Mcp-Session-Id`
-
-These settings maximise compatibility with Grok, Claude, Cursor and other remote clients.
-
-After a successful deploy the workflow prints the current `PUBLIC_IP` and a clear note about the HTTPS requirement. Check the GitHub Actions log for the latest run.
+The server is configured with `stateless_http=True`, `json_response=True`, and CORS that exposes `Mcp-Session-Id`.
 
 ## Project Structure
 ```
 .github/workflows/
-  deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble Cloud VM (auto Docker install)
+  deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble + optional cloudflared
 src/
   main.py                      # Apify entrypoint
   flashscore_mcp/
