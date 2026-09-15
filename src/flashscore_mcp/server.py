@@ -1,4 +1,4 @@
-"""Production MCP server - IaaS + Apify ready, with results caching."""
+"""Production MCP server — no results cache, fast scrapes."""
 
 from __future__ import annotations
 import asyncio
@@ -13,8 +13,6 @@ from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, N
 from .extractors import discovery, standings, results, fixtures, news, archive
 from . import __version__
 
-# Create the FastMCP instance. Stateless + JSON response defaults are applied
-# at the http_app() call site so both stdio and HTTP entrypoints remain valid.
 mcp = FastMCP("flashscore-mcp")
 
 
@@ -22,48 +20,45 @@ mcp = FastMCP("flashscore-mcp")
 async def root(request: Request) -> PlainTextResponse:
     return PlainTextResponse(
         f"Flashscore MCP Server v{__version__}\n"
-        "MCP endpoint: POST /mcp  (Streamable HTTP, stateless + JSON)\n"
+        "MCP endpoint: POST /mcp\n"
         "Health: GET /health\n"
     )
 
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
-    """Simple liveness / readiness probe used by deploy healthchecks and external monitors."""
     return JSONResponse(
         {
             "status": "ok",
             "service": "flashscore-mcp",
             "version": __version__,
             "mcp_endpoint": "/mcp",
-            "transport": "streamable-http",
-            "stateless_http": True,
-            "json_response": True,
+            "cache": False,
         }
     )
 
 
 @mcp.tool()
 async def list_sports() -> List[Sport]:
-    """List all sports from top menu. Auto-adapts via fallback selectors + cache."""
+    """List sports from the top menu."""
     return await discovery.list_sports()
 
 
 @mcp.tool()
 async def list_countries(sport: str) -> List[Country]:
-    """List countries for a sport (left menu). Resilient selectors."""
+    """List countries for a sport (left menu)."""
     return await discovery.list_countries(sport)
 
 
 @mcp.tool()
 async def list_leagues(sport: str, country: str) -> List[League]:
-    """List leagues for sport+country (left menu). On-demand ready."""
+    """List leagues for sport + country (left menu, on-demand)."""
     return await discovery.list_leagues(sport, country)
 
 
 @mcp.tool()
 async def get_standings(league: str, season: str = "current") -> List[StandingRow]:
-    """Current or historical standings (MP, W, L, PF, PA, Form)."""
+    """Standings: MP, W, L, PF, PA, Form. No cache."""
     return await standings.get_standings(league, season)
 
 
@@ -75,34 +70,25 @@ async def get_results_history(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """
-    Full game results history.
-
-    Returns games with: date, home_team, away_team, home_pf (points for home), away_pf (points for away).
-
-    Caching (history never changes):
-    - Past games are cached permanently / long-TTL.
-    - Use since="auto" (or omit after first run) to only fetch newer games and append to cache.
-    - Greatly reduces cost on Apify / cloud IaaS for repeated updates.
-    """
+    """Live results history: date, home_team, away_team, home_pf, away_pf. No cache."""
     return await results.get_results_history(league, season, mode, limit, since)
 
 
 @mcp.tool()
 async def get_upcoming_fixtures(league: str, limit: int = 20) -> List[Fixture]:
-    """Upcoming fixtures."""
+    """Upcoming fixtures only (played games filtered out). No cache."""
     return await fixtures.get_upcoming_fixtures(league, limit)
 
 
 @mcp.tool()
 async def get_news(league: str, limit: int = 10) -> List[NewsItem]:
-    """News headings + links."""
+    """News headings + links from the league news tab."""
     return await news.get_news(league, limit)
 
 
 @mcp.tool()
 async def list_archive_seasons(league: str) -> List[Season]:
-    """Previous seasons available."""
+    """Previous seasons from the archive tab."""
     return await archive.list_archive_seasons(league)
 
 
@@ -117,7 +103,7 @@ async def get_historical_results(league: str, season: str, limit: Optional[int] 
 
 
 async def main() -> None:
-    logger.info("Starting private Flashscore MCP Server v{} (Apify + IaaS + local ready)", __version__)
+    logger.info("Starting Flashscore MCP Server v{}", __version__)
     await mcp.run_stdio_async()
 
 
