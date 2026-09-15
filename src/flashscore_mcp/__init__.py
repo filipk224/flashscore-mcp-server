@@ -1,2 +1,2 @@
-"""Private production Flashscore MCP Server - adaptable, IaaS ready."""
-__version__ = "0.1.3"
+"""Private production Flashscore MCP Server."""
+__version__ = "0.2.0"
