@@ -1,4 +1,4 @@
-"""Production BrowserManager - resilient, rate-limited, IaaS friendly."""
+"""Browser manager — fast path, no human-delay sleeps."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import AsyncIterator, List, Optional
 
 from loguru import logger
 from playwright.async_api import async_playwright, Browser, Page, Locator
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .config import settings
 
@@ -31,7 +31,11 @@ class BrowserManager:
                 headless=settings.headless,
                 args=settings.browser_args,
             )
-            logger.info("Browser started (headless={}, concurrent={})", settings.headless, settings.max_concurrent_pages)
+            logger.info(
+                "Browser started (headless={}, concurrent={})",
+                settings.headless,
+                settings.max_concurrent_pages,
+            )
 
     async def stop(self) -> None:
         if self._browser:
@@ -48,13 +52,9 @@ class BrowserManager:
         async with self._semaphore:
             context = await self._browser.new_context(
                 user_agent=settings.user_agent,
-                viewport={"width": 1366, "height": 900},
+                viewport={"width": 1280, "height": 800},
                 locale="en-US",
                 java_script_enabled=True,
-            )
-            # Stealth-ish
-            await context.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
             page = await context.new_page()
             try:
@@ -66,14 +66,24 @@ class BrowserManager:
 browser_manager = BrowserManager()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(stop=stop_after_attempt(2), wait=wait_fixed(0.4))
 async def safe_goto(page: Page, url: str, **kwargs) -> None:
-    await page.goto(url, wait_until="domcontentloaded", timeout=settings.nav_timeout_ms, **kwargs)
-    await asyncio.sleep(settings.min_delay_s)
+    await page.goto(
+        url,
+        wait_until="domcontentloaded",
+        timeout=settings.nav_timeout_ms,
+        **kwargs,
+    )
+    try:
+        await page.wait_for_selector(
+            ".event__match, .ui-table, [id^='g_'], a[href*='/news/'], [class*='archive']",
+            timeout=4000,
+        )
+    except Exception:
+        pass
 
 
-async def find_first_locator(page: Page, selector_list: List[str], timeout: int = 5000) -> Optional[Locator]:
-    """Try fallback selectors in order for auto-adaptation to slight site changes."""
+async def find_first_locator(page: Page, selector_list: List[str], timeout: int = 1500) -> Optional[Locator]:
     for sel in selector_list:
         try:
             loc = page.locator(sel).first
@@ -88,7 +98,6 @@ async def find_first_locator(page: Page, selector_list: List[str], timeout: int 
 
 
 async def get_all_matching(page: Page, selector_list: List[str]) -> List[Locator]:
-    """Return all elements matching the first successful selector strategy."""
     for sel in selector_list:
         try:
             locs = page.locator(sel)
@@ -99,3 +108,18 @@ async def get_all_matching(page: Page, selector_list: List[str]) -> List[Locator
         except Exception:
             continue
     return []
+
+
+async def click_show_more(page: Page, max_clicks: int = 12) -> int:
+    clicks = 0
+    for _ in range(max_clicks):
+        more = await find_first_locator(page, settings.selectors["show_more"], timeout=800)
+        if not more:
+            break
+        try:
+            await more.click(timeout=800)
+            clicks += 1
+            await page.wait_for_timeout(200)
+        except Exception:
+            break
+    return clicks

@@ -1,13 +1,10 @@
-"""Production config with multi-fallback selectors for auto-adaptation to slight site changes.
-IaaS-friendly: all key settings overridable via FLASHSCORE_* environment variables.
-"""
+"""Production config. Fast scrape defaults — no human-delay padding."""
 
 from pydantic_settings import BaseSettings
 from typing import List, Dict
 
 
 class Settings(BaseSettings):
-    # Browser / scraping
     headless: bool = True
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -15,69 +12,70 @@ class Settings(BaseSettings):
         "Chrome/126.0.0.0 Safari/537.36"
     )
     browser_args: List[str] = [
-        "--disable-blink-features=AutomationControlled",
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",  # important in containers with limited /dev/shm
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
     ]
-    nav_timeout_ms: int = 45000
-    min_delay_s: float = 1.8
-    max_concurrent_pages: int = 2
-
-    # Site
+    nav_timeout_ms: int = 25000
+    min_delay_s: float = 0.0
+    max_concurrent_pages: int = 4
     base_url: str = "https://www.flashscore.com"
-
-    # IaaS / HTTP server
     port: int = 8000
     host: str = "0.0.0.0"
     log_level: str = "INFO"
 
-    # Multi-fallback selectors for auto-adaptation.
-    # Order: try first, then next if not found. Prefer role/text based.
-    # Update these lists when site changes slightly.
     selectors: Dict[str, List[str]] = {
         "top_sports_links": [
-            "nav a[href*='/']",
-            "header a[href*='/football/'], header a[href*='/basketball/']",
-            "[class*='menu'] a[href*='/']",
-            "a[href*='/football/'], a[href*='/volleyball/'], a[href*='/rugby']",
+            "nav a[href^='/']",
+            "header a[href*='/football/']",
+            "[class*='menu'] a[href^='/']",
         ],
         "left_menu": [
             "[class*='leftMenu']",
             "aside",
             "[class*='sidebar']",
             ".menu__section",
-            "[data-testid*='menu']",
         ],
         "country_headers": [
+            "[class*='lmc__header']",
             "[class*='country']",
-            "h3, h4, .heading",
-            "div[class*='header']",
+            "h3, h4",
         ],
         "league_links": [
             "a[href*='/standings']",
             "a[href*='/results']",
             "a[href*='/fixtures']",
-            "a[href*='/']",
         ],
         "standings_table": [
+            ".ui-table",
+            "[class*='tableWrapper'] table",
             "table",
             "[class*='standings'] table",
-            "[class*='table']",
             "[role='table']",
-            ".ui-table",
         ],
         "results_rows": [
+            ".event__match",
+            "[class*='event__match']",
+            "[id^='g_']",
             "[class*='event']",
-            "[class*='match']",
-            "[class*='result']",
-            "div[class*='row']",
         ],
         "show_more": [
+            "a.event__more",
+            ".event__more",
+            "a:has-text('Show more matches')",
             "button:has-text('Show more')",
             "a:has-text('Show more')",
-            "[class*='more']",
-            "button[class*='load']",
+        ],
+        "news_items": [
+            "a[href*='/news/']",
+            "article a",
+            "[class*='news'] a",
+        ],
+        "archive_rows": [
+            "a[href*='/']",
+            "[class*='archive'] a",
+            "table a",
         ],
     }
 
