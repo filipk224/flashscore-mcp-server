@@ -102,10 +102,15 @@ async def get_historical_results(league: str, season: str, limit: Optional[int] 
     return await results.get_results_history(league, season, "full", limit)
 
 
-async def main() -> None:
+async def _amain() -> None:
     logger.info("Starting Flashscore MCP Server v{}", __version__)
     await mcp.run_stdio_async()
 
 
+def main() -> None:
+    """Sync CLI entrypoint used by `uv run flashscore-mcp`."""
+    asyncio.run(_amain())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
