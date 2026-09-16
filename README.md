@@ -7,7 +7,7 @@ Supports:
 - **Apify Actor** (Standby + Streamable HTTP)
 - **General IaaS / cloud** (Railway, Fly.io, Render, DigitalOcean, AWS, Cloud Run, etc.)
 - **Rumble Cloud** (automated deploy via GitHub Actions on every push to `main`)
-- **Cloudflare Tunnel** (`cloudflared` sidecar) for HTTPS in front of the private/public VM
+- **Cloudflare Quick Tunnel** (`cloudflared` sidecar → `https://*.trycloudflare.com`) for HTTPS in front of the VM
 
 ## Features
 - Sports discovery via top menu
@@ -81,7 +81,7 @@ On every push to `main` (or manual run) it:
 3. **Installs Docker automatically if it is not present**
 4. Writes `/opt/flashscore-mcp/docker-compose.yml` and `.env`
 5. Pulls the image and starts/recreates the MCP container
-6. If `CLOUDFLARE_TUNNEL_TOKEN` is set, starts `cloudflare/cloudflared` as a sidecar
+6. Starts `cloudflare/cloudflared` as a sidecar using a **free Quick Tunnel** (`trycloudflare.com`). No Cloudflare account, DNS zone, or token is required.
 
 ### One-time GitHub setup
 
@@ -94,9 +94,6 @@ On every push to `main` (or manual run) it:
 | `RUMBLE_SSH_PRIVATE_KEY` | Yes | Full private key (PEM) |
 | `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
 | `GHCR_PULL_TOKEN` | No | Only needed if the GHCR package stays **private**. A classic PAT with `read:packages` |
-| `CLOUDFLARE_TUNNEL_TOKEN` | No* | Remotely-managed tunnel token (`eyJ...`). Required to start `cloudflared` on the VM |
-
-\*Without this secret the MCP container still deploys; there is no HTTPS hostname.
 
 **Variable** (Settings → Secrets and variables → Actions → Variables):
 
@@ -104,17 +101,17 @@ On every push to `main` (or manual run) it:
 |----------|-------|
 | `ENABLE_RUMBLE_DEPLOY` | `true` |
 
-### One-time Cloudflare Tunnel setup
+### Cloudflare Quick Tunnel (`trycloudflare.com`)
 
-1. Cloudflare dashboard → **Zero Trust** (or **Networking**) → **Tunnels** → Create a remotely-managed tunnel (Cloudflared).
-2. Copy the install token (`eyJ...`). Store it as GitHub secret `CLOUDFLARE_TUNNEL_TOKEN`.
-3. Add a **public hostname** on that tunnel:
-   - Subdomain + your zone (e.g. `flashscore-mcp.example.com`)
-   - Type: HTTP
-   - URL: `http://flashscore-mcp:8000`  
-     (compose service name on the Docker network — not the public IP)
-4. Push to `main` or run the workflow. Logs should show `flashscore-mcp-tunnel` running and a registered connector.
-5. MCP / Grok URL: `https://flashscore-mcp.example.com/mcp`
+On each deploy the sidecar runs:
+
+```bash
+cloudflared tunnel --no-autoupdate --url http://flashscore-mcp:8000
+```
+
+Workflow logs print `TRYCLOUDFLARE_URL=https://<random>.trycloudflare.com` and `MCP_ENDPOINT=https://<random>.trycloudflare.com/mcp`.
+
+That hostname is **ephemeral**: it changes whenever the `flashscore-mcp-tunnel` container is recreated (every push to `main`). Point Grok at the latest `MCP_ENDPOINT` from the Actions log.
 
 The VM does **not** need inbound 8000 from the internet for the tunnel path. Keep SSH reachable for deploys.
 
@@ -136,7 +133,7 @@ sudo docker compose --env-file .env logs -f --tail=100
 ```
 
 Local: `http://127.0.0.1:8000/mcp`  
-Public HTTPS: `https://<cloudflare-hostname>/mcp`
+Public HTTPS: `https://<random>.trycloudflare.com/mcp` (from the deploy job’s `MCP_ENDPOINT`)
 
 ---
 
@@ -157,14 +154,14 @@ The project remains fully compatible with Apify Actors.
 
 ## 5. Connecting from Grok (xAI)
 
-Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint. Use the Cloudflare hostname from section 3.
+Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint. Use the `MCP_ENDPOINT` printed by the latest Rumble deploy (`https://<random>.trycloudflare.com/mcp`).
 
 The server is configured with `stateless_http=True`, `json_response=True`, and CORS that exposes `Mcp-Session-Id`.
 
 ## Project Structure
 ```
 .github/workflows/
-  deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble + optional cloudflared
+  deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble + trycloudflare sidecar
 src/
   main.py                      # Apify entrypoint
   flashscore_mcp/

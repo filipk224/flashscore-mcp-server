@@ -63,7 +63,7 @@ jobs:
           key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
           port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
           script_stop: true
-          envs: GHCR_TOKEN,GITHUB_ACTOR,CLOUDFLARE_TUNNEL_TOKEN
+          envs: GHCR_TOKEN,GITHUB_ACTOR
           script: |
             set -e
 
@@ -133,20 +133,37 @@ jobs:
             sudo chown -R "$(whoami):$(whoami)" "$DEPLOY_DIR" || true
             cd "$DEPLOY_DIR"
 
-            echo "=== Write .env (tunnel token if present) ==="
+            echo "=== Write .env ==="
             umask 077
             : > .env
-            if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-              printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" > .env
-              echo "CLOUDFLARE_TUNNEL_TOKEN is set (length=${#CLOUDFLARE_TUNNEL_TOKEN})"
-              COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCiAgY2xvdWRmbGFyZWQ6CiAgICBpbWFnZTogY2xvdWRmbGFyZS9jbG91ZGZsYXJlZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBmbGFzaHNjb3JlLW1jcC10dW5uZWwKICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBjb21tYW5kOiB0dW5uZWwgLS1uby1hdXRvdXBkYXRlIHJ1biAtLXRva2VuICR7Q0xPVURGTEFSRV9UVU5ORUxfVE9LRU59CiAgICBkZXBlbmRzX29uOgogICAgICAtIGZsYXNoc2NvcmUtbWNwCg=='
-            else
-              echo "CLOUDFLARE_TUNNEL_TOKEN not set — deploying MCP only (no tunnel)"
-              COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCg=='
-            fi
 
-            echo "=== Write docker-compose.yml ==="
-            echo "$COMPOSE_B64" | base64 -d > docker-compose.yml
+            echo "=== Write docker-compose.yml (MCP + trycloudflare Quick Tunnel) ==="
+            cat > docker-compose.yml <<'COMPOSE_EOF'
+            services:
+              flashscore-mcp:
+                image: ghcr.io/filipk224/flashscore-mcp-server:latest
+                container_name: flashscore-mcp
+                restart: unless-stopped
+                ports:
+                  - "8000:8000"
+                shm_size: "1gb"
+                init: true
+                environment:
+                  - PORT=8000
+                  - HOST=0.0.0.0
+                  - FLASHSCORE_HEADLESS=true
+                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
+                  - LOG_LEVEL=info
+                  - FASTMCP_HOST=0.0.0.0
+                  - FASTMCP_PORT=8000
+              cloudflared:
+                image: cloudflare/cloudflared:latest
+                container_name: flashscore-mcp-tunnel
+                restart: unless-stopped
+                command: tunnel --no-autoupdate --url http://flashscore-mcp:8000
+                depends_on:
+                  - flashscore-mcp
+            COMPOSE_EOF
             cat docker-compose.yml
 
             echo "=== Pull + start ==="
@@ -210,28 +227,50 @@ jobs:
               echo
             fi
 
-            echo "=== Cloudflare Tunnel ==="
-            if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-              echo "--- tunnel container ---"
-              sudo docker ps -a --filter name=flashscore-mcp-tunnel
-              echo "--- tunnel logs ---"
-              sudo docker logs --tail=80 flashscore-mcp-tunnel 2>&1 || true
-              if sudo docker inspect flashscore-mcp-tunnel --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
-                echo "TUNNEL_CONTAINER=running"
-              else
-                echo "TUNNEL_CONTAINER=not_running"
+            echo "=== Cloudflare Quick Tunnel (trycloudflare.com) ==="
+            echo "--- tunnel container ---"
+            sudo docker ps -a --filter name=flashscore-mcp-tunnel
+            TRYCLOUDFLARE_URL=""
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              TRYCLOUDFLARE_URL=$(sudo docker logs flashscore-mcp-tunnel 2>&1 | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n 1 || true)
+              if [ -n "$TRYCLOUDFLARE_URL" ]; then
+                break
               fi
-              echo "Configure public hostname in Cloudflare Zero Trust → Networks → Tunnels:"
-              echo "  Service URL: http://flashscore-mcp:8000"
-              echo "  Client path: https://<your-hostname>/mcp"
+              echo "Waiting for trycloudflare URL... ($i)"
+              sleep 5
+            done
+            echo "--- tunnel logs ---"
+            sudo docker logs --tail=80 flashscore-mcp-tunnel 2>&1 || true
+            if sudo docker inspect flashscore-mcp-tunnel --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+              echo "TUNNEL_CONTAINER=running"
             else
-              echo "Tunnel skipped (no CLOUDFLARE_TUNNEL_TOKEN secret)."
+              echo "TUNNEL_CONTAINER=not_running"
+            fi
+            if [ -n "$TRYCLOUDFLARE_URL" ]; then
+              echo "TRYCLOUDFLARE_URL=${TRYCLOUDFLARE_URL}"
+              echo "MCP_ENDPOINT=${TRYCLOUDFLARE_URL}/mcp"
+              echo "--- trycloudflare GET /health ---"
+              curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 15 --max-time 25 \
+                "${TRYCLOUDFLARE_URL}/health" || echo "trycloudflare_health_failed=$?"
+              echo
+              echo "--- trycloudflare MCP initialize ---"
+              curl -sS -o /tmp/mcp_cf.txt -w "HTTP_CODE=%{http_code}\n" \
+                --connect-timeout 15 --max-time 30 \
+                -X POST "${TRYCLOUDFLARE_URL}/mcp" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json, text/event-stream" \
+                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
+                || echo "trycloudflare_mcp_failed=$?"
+              head -c 500 /tmp/mcp_cf.txt 2>/dev/null || true
+              echo
+            else
+              echo "ERROR: trycloudflare URL not found in tunnel logs"
             fi
 
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
             echo "PUBLIC_IP=${PUBLIC_IP}"
             echo "HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
-            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use the Cloudflare hostname."
+            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com)."
 
             if [ -n "$PUBLIC_IP" ]; then
               echo "--- external GET /health ---"
@@ -247,4 +286,3 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}

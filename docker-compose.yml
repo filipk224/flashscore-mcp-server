@@ -3,10 +3,9 @@
 #   docker compose up --build
 # MCP: http://localhost:8000/mcp
 #
-# Optional Cloudflare Tunnel (remotely-managed):
-#   export CLOUDFLARE_TUNNEL_TOKEN=eyJ...
+# Optional Cloudflare Quick Tunnel (free trycloudflare.com hostname):
 #   docker compose --profile tunnel up --build
-# Dashboard public hostname must target http://flashscore-mcp:8000
+# Public URL is printed in flashscore-mcp-tunnel logs and rotates on restart.
 
 services:
   flashscore-mcp:
@@ -30,6 +29,6 @@ services:
     container_name: flashscore-mcp-tunnel
     profiles: ["tunnel"]
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate --url http://flashscore-mcp:8000
     depends_on:
       - flashscore-mcp
