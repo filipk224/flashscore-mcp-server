@@ -138,32 +138,8 @@ jobs:
             : > .env
 
             echo "=== Write docker-compose.yml (MCP + trycloudflare Quick Tunnel) ==="
-            cat > docker-compose.yml <<'COMPOSE_EOF'
-            services:
-              flashscore-mcp:
-                image: ghcr.io/filipk224/flashscore-mcp-server:latest
-                container_name: flashscore-mcp
-                restart: unless-stopped
-                ports:
-                  - "8000:8000"
-                shm_size: "1gb"
-                init: true
-                environment:
-                  - PORT=8000
-                  - HOST=0.0.0.0
-                  - FLASHSCORE_HEADLESS=true
-                  - FLASHSCORE_MAX_CONCURRENT_PAGES=2
-                  - LOG_LEVEL=info
-                  - FASTMCP_HOST=0.0.0.0
-                  - FASTMCP_PORT=8000
-              cloudflared:
-                image: cloudflare/cloudflared:latest
-                container_name: flashscore-mcp-tunnel
-                restart: unless-stopped
-                command: tunnel --no-autoupdate --url http://flashscore-mcp:8000
-                depends_on:
-                  - flashscore-mcp
-            COMPOSE_EOF
+            COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCiAgY2xvdWRmbGFyZWQ6CiAgICBpbWFnZTogY2xvdWRmbGFyZS9jbG91ZGZsYXJlZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBmbGFzaHNjb3JlLW1jcC10dW5uZWwKICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBjb21tYW5kOiB0dW5uZWwgLS1uby1hdXRvdXBkYXRlIC0tdXJsIGh0dHA6Ly9mbGFzaHNjb3JlLW1jcDo4MDAwCiAgICBkZXBlbmRzX29uOgogICAgICAtIGZsYXNoc2NvcmUtbWNwCg=='
+            echo "$COMPOSE_B64" | base64 -d > docker-compose.yml
             cat docker-compose.yml
 
             echo "=== Pull + start ==="
