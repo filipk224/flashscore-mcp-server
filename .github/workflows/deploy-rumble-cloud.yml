@@ -262,3 +262,44 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+
+  check-tunnel-url:
+    name: Check latest trycloudflare URL
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Read TRYCLOUDFLARE_URL from this commit's deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          URL=""
+          for i in 1 2 3 4 5 6 7 8; do
+            URL=$(gh run view "${{ github.run_id }}" --log 2>/dev/null \
+              | grep -oE 'TRYCLOUDFLARE_URL=https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
+              | tail -n 1 | sed 's/^TRYCLOUDFLARE_URL=//' || true)
+            if [ -n "$URL" ]; then
+              break
+            fi
+            echo "Waiting for deploy logs... ($i)"
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no TRYCLOUDFLARE_URL in this commit's deploy logs"
+            exit 1
+          fi
+          ENDPOINT="${URL}/mcp"
+          echo "TRYCLOUDFLARE_URL=${URL}"
+          echo "MCP_ENDPOINT=${ENDPOINT}"
+          {
+            echo "## Flashscore MCP URL (this commit)"
+            echo ""
+            echo "- Tunnel: \`${URL}\`"
+            echo "- MCP: \`${ENDPOINT}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Checking health..."
+          curl -fsS --connect-timeout 15 --max-time 25 "${URL}/health"
+          echo
