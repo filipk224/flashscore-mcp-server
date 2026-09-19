@@ -3,8 +3,6 @@ name: Build & Deploy to Rumble Cloud
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - mcp-endpoint.txt
   workflow_dispatch:
 
 env:
@@ -264,64 +262,3 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-
-  check-tunnel-url:
-    name: Check latest trycloudflare URL
-    needs: deploy
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Read TRYCLOUDFLARE_URL from completed deploy job
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          URL=""
-          for i in 1 2 3 4 5 6 7 8; do
-            JOB_ID=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" --jq '.jobs[] | select(.name=="Deploy to Rumble Cloud") | .id')
-            echo "deploy_job_id=${JOB_ID} attempt=${i}"
-            LOGS=$(gh run view --job "${JOB_ID}" --log || true)
-            URL=$(printf '%s\n' "$LOGS" | grep -oE 'TRYCLOUDFLARE_URL=https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n 1 | sed 's/^TRYCLOUDFLARE_URL=//' || true)
-            if [ -z "$URL" ]; then
-              URL=$(printf '%s\n' "$LOGS" | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n 1 || true)
-            fi
-            if [ -n "$URL" ]; then
-              break
-            fi
-            echo "URL not in logs yet; retrying..."
-            sleep 5
-          done
-          if [ -z "$URL" ]; then
-            echo "ERROR: no trycloudflare URL in deploy job logs"
-            exit 1
-          fi
-          ENDPOINT="${URL}/mcp"
-          echo "TRYCLOUDFLARE_URL=${URL}"
-          echo "MCP_ENDPOINT=${ENDPOINT}"
-          printf '%s\n' "$ENDPOINT" > mcp-endpoint.txt
-          {
-            echo "## Flashscore MCP URL (this commit)"
-            echo ""
-            echo "- Tunnel: \`${URL}\`"
-            echo "- MCP: \`${ENDPOINT}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "Checking health..."
-          curl -fsS --connect-timeout 15 --max-time 25 "${URL}/health"
-          echo
-
-      - name: Commit MCP endpoint
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add mcp-endpoint.txt
-          if git diff --cached --quiet; then
-            echo "MCP endpoint unchanged"
-            exit 0
-          fi
-          git commit -m "chore: sync trycloudflare MCP URL after deploy"
-          git push
