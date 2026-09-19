@@ -3,6 +3,8 @@ name: Build & Deploy to Rumble Cloud
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - mcp-endpoint.txt
   workflow_dispatch:
 
 env:
@@ -182,7 +184,7 @@ jobs:
               -X POST http://127.0.0.1:8000/mcp \
               -H "Content-Type: application/json" \
               -H "Accept: application/json, text/event-stream" \
-              -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
+              -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"deploy-healthcheck\",\"version\":\"1.0\"}}}' \
               || echo "curl_local_failed=$?"
             echo "=== response headers ==="
             head -c 1000 /tmp/mcp_headers.txt 2>/dev/null || true
@@ -191,14 +193,14 @@ jobs:
             head -c 800 /tmp/mcp_body.txt 2>/dev/null || true
             echo
 
-            if grep -q '"result"' /tmp/mcp_body.txt 2>/dev/null; then
+            if grep -q '\"result\"' /tmp/mcp_body.txt 2>/dev/null; then
               echo "--- MCP tools/list (stateless) ---"
               curl -sS -o /tmp/mcp_tools.txt -w "HTTP_CODE=%{http_code}\n" \
                 --connect-timeout 10 --max-time 30 \
                 -X POST http://127.0.0.1:8000/mcp \
                 -H "Content-Type: application/json" \
                 -H "Accept: application/json, text/event-stream" \
-                -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' || true
+                -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}' || true
               head -c 600 /tmp/mcp_tools.txt 2>/dev/null || true
               echo
             fi
@@ -206,59 +208,59 @@ jobs:
             echo "=== Cloudflare Quick Tunnel (trycloudflare.com) ==="
             echo "--- tunnel container ---"
             sudo docker ps -a --filter name=flashscore-mcp-tunnel
-            TRYCLOUDFLARE_URL=""
+            TRYCLOUDFLARE_URL=\"\"
             for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
               TRYCLOUDFLARE_URL=$(sudo docker logs flashscore-mcp-tunnel 2>&1 | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n 1 || true)
-              if [ -n "$TRYCLOUDFLARE_URL" ]; then
+              if [ -n \"$TRYCLOUDFLARE_URL\" ]; then
                 break
               fi
-              echo "Waiting for trycloudflare URL... ($i)"
+              echo \"Waiting for trycloudflare URL... ($i)\"
               sleep 5
             done
-            echo "--- tunnel logs ---"
+            echo \"--- tunnel logs ---\"
             sudo docker logs --tail=80 flashscore-mcp-tunnel 2>&1 || true
             if sudo docker inspect flashscore-mcp-tunnel --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
-              echo "TUNNEL_CONTAINER=running"
+              echo \"TUNNEL_CONTAINER=running\"
             else
-              echo "TUNNEL_CONTAINER=not_running"
+              echo \"TUNNEL_CONTAINER=not_running\"
             fi
-            if [ -n "$TRYCLOUDFLARE_URL" ]; then
-              echo "TRYCLOUDFLARE_URL=${TRYCLOUDFLARE_URL}"
-              echo "MCP_ENDPOINT=${TRYCLOUDFLARE_URL}/mcp"
-              echo "--- trycloudflare GET /health ---"
-              curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 15 --max-time 25 \
-                "${TRYCLOUDFLARE_URL}/health" || echo "trycloudflare_health_failed=$?"
+            if [ -n \"$TRYCLOUDFLARE_URL\" ]; then
+              echo \"TRYCLOUDFLARE_URL=${TRYCLOUDFLARE_URL}\"
+              echo \"MCP_ENDPOINT=${TRYCLOUDFLARE_URL}/mcp\"
+              echo \"--- trycloudflare GET /health ---\"
+              curl -sS -w \"\\nHTTP_CODE=%{http_code}\\n\" --connect-timeout 15 --max-time 25 \\
+                \"${TRYCLOUDFLARE_URL}/health\" || echo \"trycloudflare_health_failed=$?\"
               echo
-              echo "--- trycloudflare MCP initialize ---"
-              curl -sS -o /tmp/mcp_cf.txt -w "HTTP_CODE=%{http_code}\n" \
-                --connect-timeout 15 --max-time 30 \
-                -X POST "${TRYCLOUDFLARE_URL}/mcp" \
-                -H "Content-Type: application/json" \
-                -H "Accept: application/json, text/event-stream" \
-                -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
-                || echo "trycloudflare_mcp_failed=$?"
+              echo \"--- trycloudflare MCP initialize ---\"
+              curl -sS -o /tmp/mcp_cf.txt -w \"HTTP_CODE=%{http_code}\\n\" \\
+                --connect-timeout 15 --max-time 30 \\
+                -X POST \"${TRYCLOUDFLARE_URL}/mcp\" \\
+                -H \"Content-Type: application/json\" \\
+                -H \"Accept: application/json, text/event-stream\" \\
+                -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"deploy-healthcheck\",\"version\":\"1.0\"}}}' \\
+                || echo \"trycloudflare_mcp_failed=$?\"
               head -c 500 /tmp/mcp_cf.txt 2>/dev/null || true
               echo
             else
-              echo "ERROR: trycloudflare URL not found in tunnel logs"
+              echo \"ERROR: trycloudflare URL not found in tunnel logs\"
             fi
 
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
-            echo "PUBLIC_IP=${PUBLIC_IP}"
-            echo "HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
-            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com)."
+            echo \"PUBLIC_IP=${PUBLIC_IP}\"
+            echo \"HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp\"
+            echo \"NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com).\"
 
-            if [ -n "$PUBLIC_IP" ]; then
-              echo "--- external GET /health ---"
-              curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
-                "http://${PUBLIC_IP}:8000/health" || echo "ext_health_failed=$?"
+            if [ -n \"$PUBLIC_IP\" ]; then
+              echo \"--- external GET /health ---\"
+              curl -sS -w \"\\nHTTP_CODE=%{http_code}\\n\" --connect-timeout 10 --max-time 15 \\
+                \"http://${PUBLIC_IP}:8000/health\" || echo \"ext_health_failed=$?\"
               echo
             fi
 
-            echo "--- MCP container logs (last 100 lines) ---"
+            echo \"--- MCP container logs (last 100 lines) ---\"
             sudo docker logs --tail=100 flashscore-mcp 2>&1 || true
 
-            echo "=== Deploy complete ==="
+            echo \"=== Deploy complete ===\"
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -269,37 +271,49 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      contents: read
+      contents: write
     steps:
-      - name: Read TRYCLOUDFLARE_URL from this commit's deploy
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Read TRYCLOUDFLARE_URL from completed deploy job
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          URL=""
-          for i in 1 2 3 4 5 6 7 8; do
-            URL=$(gh run view "${{ github.run_id }}" --log 2>/dev/null \
-              | grep -oE 'TRYCLOUDFLARE_URL=https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
-              | tail -n 1 | sed 's/^TRYCLOUDFLARE_URL=//' || true)
-            if [ -n "$URL" ]; then
-              break
-            fi
-            echo "Waiting for deploy logs... ($i)"
-            sleep 5
-          done
-          if [ -z "$URL" ]; then
-            echo "ERROR: no TRYCLOUDFLARE_URL in this commit's deploy logs"
+          JOB_ID=$(gh api \"repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs\" --jq '.jobs[] | select(.name==\"Deploy to Rumble Cloud\") | .id')
+          echo \"deploy_job_id=${JOB_ID}\"
+          LOGS=$(gh api \"repos/${GITHUB_REPOSITORY}/actions/jobs/${JOB_ID}/logs\")
+          URL=$(printf '%s\\n' \"$LOGS\" | grep -oE 'TRYCLOUDFLARE_URL=https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' | tail -n 1 | sed 's/^TRYCLOUDFLARE_URL=//' || true)
+          if [ -z \"$URL\" ]; then
+            URL=$(printf '%s\\n' \"$LOGS\" | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' | tail -n 1 || true)
+          fi
+          if [ -z \"$URL\" ]; then
+            echo \"ERROR: no trycloudflare URL in deploy job logs\"
             exit 1
           fi
-          ENDPOINT="${URL}/mcp"
-          echo "TRYCLOUDFLARE_URL=${URL}"
-          echo "MCP_ENDPOINT=${ENDPOINT}"
+          ENDPOINT=\"${URL}/mcp\"
+          echo \"TRYCLOUDFLARE_URL=${URL}\"
+          echo \"MCP_ENDPOINT=${ENDPOINT}\"
+          printf '%s\\n' \"$ENDPOINT\" > mcp-endpoint.txt
           {
-            echo "## Flashscore MCP URL (this commit)"
-            echo ""
-            echo "- Tunnel: \`${URL}\`"
-            echo "- MCP: \`${ENDPOINT}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "Checking health..."
-          curl -fsS --connect-timeout 15 --max-time 25 "${URL}/health"
+            echo \"## Flashscore MCP URL (this commit)\"
+            echo \"\"
+            echo \"- Tunnel: \\`${URL}\\`\"
+            echo \"- MCP: \\`${ENDPOINT}\\`\"
+          } >> \"$GITHUB_STEP_SUMMARY\"
+          echo \"Checking health...\"
+          curl -fsS --connect-timeout 15 --max-time 25 \"${URL}/health\"
           echo
+
+      - name: Commit MCP endpoint
+        run: |
+          git config user.name \"github-actions[bot]\"
+          git config user.email \"41898282+github-actions[bot]@users.noreply.github.com\"
+          git add mcp-endpoint.txt
+          if git diff --cached --quiet; then
+            echo \"MCP endpoint unchanged\"
+            exit 0
+          fi
+          git commit -m \"chore: sync trycloudflare MCP URL after deploy\"
+          git push
