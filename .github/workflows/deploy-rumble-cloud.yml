@@ -142,6 +142,15 @@ jobs:
             echo "$COMPOSE_B64" | base64 -d > docker-compose.yml
             cat docker-compose.yml
 
+            echo "=== Stop old stack and free Docker disk ==="
+            sudo docker compose --env-file .env down --remove-orphans || true
+            sudo docker system prune -af || true
+            echo "--- docker system df ---"
+            sudo docker system df || true
+            echo "--- df -h ---"
+            df -h /
+            df -h /var /var/lib 2>/dev/null || true
+
             echo "=== Pull + start ==="
             sudo docker compose --env-file .env pull
             sudo docker compose --env-file .env up -d --force-recreate --remove-orphans
