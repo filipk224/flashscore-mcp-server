@@ -1,0 +1,47 @@
+# One-shot: free leftover Docker/containerd space from a failed image extract,
+# then start the existing stack. Not part of Build & Deploy.
+name: Recover Rumble disk
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    name: Recover disk and start stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.RUMBLE_SSH_HOST }}
+          username: ${{ secrets.RUMBLE_SSH_USER }}
+          key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -e
+            echo "=== Before ==="
+            df -h /
+            sudo docker ps -a || true
+            sudo docker system df || true
+
+            echo "=== Remove dangling containers/images/build cache only ==="
+            sudo docker container prune -f || true
+            sudo docker image prune -f || true
+            sudo docker builder prune -f || true
+            sudo docker system prune -f || true
+
+            echo "=== After ==="
+            df -h /
+            sudo docker system df || true
+            sudo docker images || true
+
+            echo "=== Start existing compose (no pull) ==="
+            cd /opt/flashscore-mcp
+            sudo docker compose --env-file .env up -d --remove-orphans
+            sudo docker compose --env-file .env ps
+            sleep 10
+            curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              http://127.0.0.1:8000/health || echo "health_failed=$?"
+            sudo docker logs --tail=40 flashscore-mcp-tunnel 2>&1 || true
+            echo "=== Recover complete ==="
