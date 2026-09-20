@@ -8,7 +8,7 @@
 
 # Playwright Python package in requirements.txt MUST match this image tag.
 # Mismatch => BrowserType.launch: Executable doesn't exist under /ms-playwright.
-FROM mcr.microsoft.com/playwright/python:v1.62.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
