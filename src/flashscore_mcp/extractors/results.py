@@ -1,72 +1,59 @@
-"""Results history — no cache. Live scrape every call. Fast, hardened parse."""
+"""Results history. The match-row parser is shared with fixtures and the summary tab."""
 from __future__ import annotations
+
 from typing import List, Optional
+from urllib.parse import urljoin
+
 from loguru import logger
-from ..browser import browser_manager, safe_goto, click_show_more
+
 from ..config import settings
 from ..models import MatchResult
-from .parse_util import EXTRACT_MATCHES_JS, looks_like_team, parse_int, parse_score_pair, split_datetime
+from ..parsers.archive import parse_archive, resolve_season
+from ..parsers.matches import parse_matches
+from .fetch import fetch_html
+
 
 def _league_url(league: str, season: str, tab: str) -> str:
     if league.startswith("http"):
         base = league.rstrip("/")
-        for suffix in ("/results", "/fixtures", "/standings", "/news", "/archive"):
+        for suffix in ("/results", "/fixtures", "/standings", "/news", "/archive", "/odds"):
             if base.endswith(suffix):
                 base = base[: -len(suffix)]
-        return f"{base}/{tab}/"
+        return f"{base}/{tab}/" if tab else f"{base}/"
     key = league.strip("/")
     if season and season not in ("current",) and season.isdigit() and f"-{season}" not in key:
         parts = key.split("/")
         parts[-1] = f"{parts[-1]}-{season}"
         key = "/".join(parts)
-    return f"{settings.base_url}/{key}/{tab}/"
+    return f"{settings.base_url}/{key}/{tab}/" if tab else f"{settings.base_url}/{key}/"
 
-def _row_to_result(row: dict) -> Optional[MatchResult]:
-    home = row.get("home") or ""
-    away = row.get("away") or ""
-    home_pf = parse_int(row.get("home_score") or "")
-    away_pf = parse_int(row.get("away_score") or "")
-    date, time = split_datetime(row.get("time") or "")
-    if (not looks_like_team(home) or not looks_like_team(away) or home_pf is None or away_pf is None):
-        text = row.get("text") or ""
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        for line in lines:
-            pair = parse_score_pair(line)
-            if pair:
-                home_pf, away_pf = pair
-                break
-        teams = [l for l in lines if looks_like_team(l)]
-        if len(teams) >= 2:
-            home, away = teams[0], teams[1]
-        if not date:
-            date, time = split_datetime(lines[0] if lines else "")
-    if not looks_like_team(home) or not looks_like_team(away):
-        return None
-    if home_pf is None or away_pf is None:
-        return None
-    return MatchResult(date=date or time, home_team=home, away_team=away, home_pf=home_pf, away_pf=away_pf)
 
-async def get_results_history(league: str, season: str = "current", mode: str = "full", limit: Optional[int] = None, since: Optional[str] = None) -> List[MatchResult]:
-    url = _league_url(league, season, "results")
-    logger.info("get_results_history url={} limit={}", url, limit)
-    results: List[MatchResult] = []
-    seen = set()
-    async with browser_manager.new_page() as page:
-        await safe_goto(page, url)
-        await click_show_more(page, max_clicks=14)
-        rows = await page.evaluate(EXTRACT_MATCHES_JS)
-    for row in rows:
-        parsed = _row_to_result(row)
-        if not parsed:
-            continue
-        if since and parsed.date and parsed.date <= since:
-            continue
-        key = (parsed.date, parsed.home_team, parsed.away_team, parsed.home_pf, parsed.away_pf)
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append(parsed)
+async def _season_tab_url(league: str, season: str, tab: str) -> str | None:
+    """Return the tab URL for a named archive season, or None when the name is unknown."""
+    if season in ("current", "", None):
+        return _league_url(league, "current", tab)
+    html = await fetch_html(_league_url(league, "current", "standings"))
+    target, _names = resolve_season(parse_archive(html), season)
+    if not target:
+        return None
+    return urljoin(settings.base_url, target).rstrip("/") + f"/{tab}/"
+
+
+async def get_results_history(
+    league: str,
+    season: str = "current",
+    mode: str = "full",
+    limit: Optional[int] = None,
+    since: Optional[str] = None,
+) -> List[MatchResult]:
+    url = await _season_tab_url(league, season, "results")
+    logger.info("get_results_history url={} mode={} limit={}", url, mode, limit)
+    if not url:
+        return []
+    games = parse_matches(await fetch_html(url, show_more=8))
+    if since:
+        games = [game for game in games if not game.date or game.date > since]
     if limit:
-        results = results[:limit]
-    logger.info("Returning {} results (no cache)", len(results))
-    return results
+        games = games[:limit]
+    logger.info("Returning {} results", len(games))
+    return games

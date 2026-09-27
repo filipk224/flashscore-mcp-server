@@ -9,8 +9,19 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 
-from .models import Sport, Country, League, StandingRow, MatchResult, Fixture, NewsItem, Season
-from .extractors import discovery, standings, results, fixtures, news, archive
+from .models import (
+    Sport,
+    Country,
+    League,
+    StandingsPage,
+    MatchResult,
+    Fixture,
+    NewsItem,
+    Season,
+    OddsPrice,
+    LeagueInfo,
+)
+from .extractors import archive, discovery, fixtures, league_info, news, odds, results, standings
 from . import __version__
 
 mcp = FastMCP("flashscore-mcp")
@@ -57,9 +68,9 @@ async def list_leagues(sport: str, country: str) -> List[League]:
 
 
 @mcp.tool()
-async def get_standings(league: str, season: str = "current") -> List[StandingRow]:
-    """Standings: MP, W, L, PF, PA, Form. No cache."""
-    return await standings.get_standings(league, season)
+async def get_standings(league: str, season: str = "current", view: str = "overall") -> StandingsPage:
+    """Standings for a league. Shared columns are played, wins, draws, losses, table_points, and form. Other columns are in extras. view is overall, home, or form."""
+    return await standings.get_standings(league, season, view)
 
 
 @mcp.tool()
@@ -70,35 +81,49 @@ async def get_results_history(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """Live results history: date, home_team, away_team, home_pf, away_pf. No cache."""
+    """Results with date, teams, status, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live."""
     return await results.get_results_history(league, season, mode, limit, since)
 
 
 @mcp.tool()
 async def get_upcoming_fixtures(league: str, limit: int = 20) -> List[Fixture]:
-    """Upcoming fixtures only (played games filtered out). No cache."""
+    """Fixtures. Rows with a dash score."""
     return await fixtures.get_upcoming_fixtures(league, limit)
 
 
 @mcp.tool()
 async def get_news(league: str, limit: int = 10) -> List[NewsItem]:
-    """News headings + links from the league news tab."""
+    """News titles and links."""
     return await news.get_news(league, limit)
 
 
 @mcp.tool()
 async def list_archive_seasons(league: str) -> List[Season]:
-    """Previous seasons from the archive tab."""
+    """Seasons from league_archive_data, including the winner when the page has one."""
     return await archive.list_archive_seasons(league)
 
 
 @mcp.tool()
-async def get_historical_standings(league: str, season: str) -> List[StandingRow]:
+async def get_league(league: str) -> LeagueInfo:
+    """Sport, country, name, season, url, tabs, and archive seasons for one league."""
+    return await league_info.get_league(league)
+
+
+@mcp.tool()
+async def get_odds(league: str, season: str = "current") -> list[OddsPrice]:
+    """Default odds tab: bookmaker, side, and price. An archived season with no Odds tab returns an empty list."""
+    return await odds.get_odds(league, season)
+
+
+@mcp.tool()
+async def get_historical_standings(league: str, season: str) -> StandingsPage:
+    """Standings for a named archive season. The table layout matches the current season."""
     return await standings.get_standings(league, season)
 
 
 @mcp.tool()
 async def get_historical_results(league: str, season: str, limit: Optional[int] = None) -> List[MatchResult]:
+    """Results for a named archive season, parsed with the same match row as the current season."""
     return await results.get_results_history(league, season, "full", limit)
 
 

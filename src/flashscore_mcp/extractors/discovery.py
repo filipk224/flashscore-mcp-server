@@ -91,33 +91,28 @@ async def list_countries(sport: str) -> List[Country]:
             ]
     return countries
 
+_TAB_SLUGS = {"standings", "results", "fixtures", "draw", "news", "archive", "odds"}
+
+
 async def list_leagues(sport: str, country: str) -> List[League]:
     sport_slug = sport.lower().replace(" ", "-")
     country_slug = country.lower().replace(" ", "-")
     url = f"{settings.base_url}/{sport_slug}/{country_slug}/"
+    from .fetch import fetch_html
+    from ..parsers.league import parse_menu_leagues
+
+    html = await fetch_html(url)
     leagues: List[League] = []
-    async with browser_manager.new_page() as page:
-        await safe_goto(page, url)
-        links = await get_all_matching(page, settings.selectors["league_links"] + [f"a[href*='/{sport_slug}/{country_slug}/']"])
-        seen = set()
-        for loc in links[:80]:
-            try:
-                href = await loc.get_attribute("href") or ""
-                text = (await loc.inner_text()).strip()
-                if not href:
-                    continue
-                full = urljoin(settings.base_url, href)
-                path_parts = [p for p in urlparse(full).path.strip("/").split("/") if p]
-                if len(path_parts) < 3 or path_parts[0] != sport_slug:
-                    continue
-                league_slug = path_parts[2]
-                if league_slug in seen or league_slug in ("standings", "results", "fixtures", "draw", "news", "archive"):
-                    continue
-                seen.add(league_slug)
-                name = text if text and text.lower() not in ("standings", "results", "fixtures", "news") else league_slug.replace("-", " ").title()
-                leagues.append(League(name=name, slug=league_slug, url=f"{settings.base_url}/{sport_slug}/{country_slug}/{league_slug}/", sport=sport_slug, country=country_slug))
-            except Exception:
-                continue
-        if not leagues:
-            leagues = [League(name=f"{country} Main League", slug="main", url=url, sport=sport_slug, country=country_slug)]
+    seen = set()
+    for league in parse_menu_leagues(html):
+        if league.sport and league.sport != sport_slug:
+            continue
+        if league.country and league.country != country_slug:
+            continue
+        if league.slug in seen or league.slug in _TAB_SLUGS:
+            continue
+        seen.add(league.slug)
+        full = urljoin(settings.base_url, league.url)
+        leagues.append(league.model_copy(update={"url": full, "sport": sport_slug, "country": country_slug}))
+    logger.info("list_leagues {} / {} -> {}", sport_slug, country_slug, len(leagues))
     return leagues
