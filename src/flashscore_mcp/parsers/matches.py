@@ -6,6 +6,8 @@ import re
 from ..models import MatchResult
 
 _ROW = re.compile(r'class="event__match ')
+_ROUND = re.compile(r'class="[^"]*event__round[^"]*"[^>]*>([^<]+)')
+_ROUND_TITLE = re.compile(r'class="[^"]*event__title[^"]*"[^>]*>([^<]+)')
 _DATE = re.compile(r"(\d{1,2}\.\d{1,2}\.?)\s*(\d{1,2}:\d{2})?")
 _PART = re.compile(
     r'class="[^"]*\bevent__part--(home|away)\b[^"]*\bevent__part--(\d+)\b'
@@ -17,13 +19,28 @@ def parse_matches(html: str) -> list[MatchResult]:
     games: list[MatchResult] = []
     for index, mark in enumerate(marks):
         end = marks[index + 1].start() if index + 1 < len(marks) else min(len(html), mark.start() + 12000)
-        game = _one(html[mark.start() : end])
+        preceding = html[max(0, mark.start() - 2500) : mark.start()]
+        game = _one(html[mark.start() : end], preceding)
         if game:
             games.append(game)
     return games
 
 
-def _one(chunk: str) -> MatchResult | None:
+def _round_from(preceding: str) -> str | None:
+    rounds = list(_ROUND.finditer(preceding))
+    if rounds:
+        text = rounds[-1].group(1).strip()
+        if text:
+            return " ".join(text.split())
+    titles = list(_ROUND_TITLE.finditer(preceding))
+    if titles:
+        text = titles[-1].group(1).strip()
+        if text and re.search(r"round|week|matchday|\d", text, re.I):
+            return " ".join(text.split())
+    return None
+
+
+def _one(chunk: str, preceding: str = "") -> MatchResult | None:
     home = _team(chunk, "event__homeParticipant") or _team(chunk, "event__participant--home")
     away = _team(chunk, "event__awayParticipant") or _team(chunk, "event__participant--away")
     if not home or not away:
@@ -39,9 +56,11 @@ def _one(chunk: str) -> MatchResult | None:
     note = _note(chunk)
     if note:
         extras["note"] = note
+    rnd = _round_from(preceding) or _round_from(chunk)
     return MatchResult(
         date=date,
         time=time,
+        round=rnd,
         home_team=home,
         away_team=away,
         status=_status(chunk, stage, home_score, away_score),

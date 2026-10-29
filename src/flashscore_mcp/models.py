@@ -56,6 +56,7 @@ class PeriodScore(BaseModel):
 class MatchResult(BaseModel):
     date: Optional[str] = None
     time: Optional[str] = None
+    round: Optional[str] = None
     home_team: str
     away_team: str
     status: str = "finished"
@@ -83,6 +84,7 @@ class LeagueInfo(BaseModel):
 class Fixture(BaseModel):
     date: Optional[str] = None
     time: Optional[str] = None
+    round: Optional[str] = None
     home_team: str
     away_team: str
     url: Optional[str] = None

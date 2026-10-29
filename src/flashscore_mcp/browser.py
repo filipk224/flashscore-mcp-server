@@ -93,7 +93,6 @@ async def find_first_locator(page: Page, selector_list: List[str], timeout: int 
                 return loc
         except Exception:
             continue
-    logger.warning("No matching selector found from list: {}", selector_list[:3])
     return None
 
 
@@ -110,16 +109,31 @@ async def get_all_matching(page: Page, selector_list: List[str]) -> List[Locator
     return []
 
 
-async def click_show_more(page: Page, max_clicks: int = 12) -> int:
+async def _match_count(page: Page) -> int:
+    try:
+        return await page.locator(".event__match, [class*='event__match'], [id^='g_']").count()
+    except Exception:
+        return 0
+
+
+async def click_show_more(
+    page: Page,
+    max_clicks: int = 40,
+    until_count: Optional[int] = None,
+) -> int:
+    """Click Show more until the button is gone, or until_count matches are loaded."""
     clicks = 0
     for _ in range(max_clicks):
-        more = await find_first_locator(page, settings.selectors["show_more"], timeout=800)
+        if until_count is not None and await _match_count(page) >= until_count:
+            logger.info("Show more stopped: {} matches reached", until_count)
+            break
+        more = await find_first_locator(page, settings.selectors["show_more"], timeout=600)
         if not more:
             break
         try:
             await more.click(timeout=800)
             clicks += 1
-            await page.wait_for_timeout(200)
+            await page.wait_for_timeout(180)
         except Exception:
             break
     return clicks

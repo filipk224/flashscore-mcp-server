@@ -29,7 +29,6 @@ def _league_url(league: str, season: str, tab: str) -> str:
 
 
 async def _season_tab_url(league: str, season: str, tab: str) -> str | None:
-    """Return the tab URL for a named archive season, or None when the name is unknown."""
     if season in ("current", "", None):
         return _league_url(league, "current", tab)
     html = await fetch_html(_league_url(league, "current", "standings"))
@@ -50,7 +49,9 @@ async def get_results_history(
     logger.info("get_results_history url={} mode={} limit={}", url, mode, limit)
     if not url:
         return []
-    games = parse_matches(await fetch_html(url, show_more=8))
+    # Keep pressing Show more until the requested count is loaded, or the button is gone.
+    html = await fetch_html(url, show_more=40, until_count=limit)
+    games = parse_matches(html)
     if since:
         games = [game for game in games if not game.date or game.date > since]
     if limit:
