@@ -118,22 +118,39 @@ async def _match_count(page: Page) -> int:
 
 async def click_show_more(
     page: Page,
-    max_clicks: int = 40,
+    max_clicks: Optional[int] = None,
     until_count: Optional[int] = None,
 ) -> int:
-    """Click Show more until the button is gone, or until_count matches are loaded."""
+    """Click Show more until the button is gone.
+
+    until_count: stop early once that many matches are loaded (limited fetches only).
+    max_clicks: hard safety only. None means keep going until the button disappears.
+    Full season data is never cut short by a click cap.
+    """
     clicks = 0
-    for _ in range(max_clicks):
+    stale = 0
+    while True:
         if until_count is not None and await _match_count(page) >= until_count:
             logger.info("Show more stopped: {} matches reached", until_count)
+            break
+        if max_clicks is not None and clicks >= max_clicks:
+            logger.warning("Show more safety cap {} reached", max_clicks)
             break
         more = await find_first_locator(page, settings.selectors["show_more"], timeout=600)
         if not more:
             break
+        before = await _match_count(page)
         try:
             await more.click(timeout=800)
             clicks += 1
             await page.wait_for_timeout(180)
         except Exception:
             break
+        if await _match_count(page) <= before:
+            stale += 1
+            if stale >= 2:
+                break
+        else:
+            stale = 0
+    logger.info("Show more clicks={}", clicks)
     return clicks

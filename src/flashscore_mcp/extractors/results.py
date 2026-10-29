@@ -49,8 +49,12 @@ async def get_results_history(
     logger.info("get_results_history url={} mode={} limit={}", url, mode, limit)
     if not url:
         return []
-    # Keep pressing Show more until the requested count is loaded, or the button is gone.
-    html = await fetch_html(url, show_more=40, until_count=limit)
+    # No limit = full season. Keep pressing Show more until the button is gone.
+    # A limit stops once that many matches are loaded, or the button is gone.
+    if limit is None:
+        html = await fetch_html(url, full=True)
+    else:
+        html = await fetch_html(url, show_more=None, until_count=limit)
     games = parse_matches(html)
     if since:
         games = [game for game in games if not game.date or game.date > since]
