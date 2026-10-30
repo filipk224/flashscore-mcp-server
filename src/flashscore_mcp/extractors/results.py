@@ -60,5 +60,14 @@ async def get_results_history(
         games = [game for game in games if not game.date or game.date > since]
     if limit:
         games = games[:limit]
+    # Adaptive note: Flashscore results tabs currently embed only the most recent
+    # rounds in the initial HTML/feed. A functional Show-more that expands the full
+    # season is not exposed in headless mode. Callers should treat counts well
+    # below a full season (e.g. < 200 for a 20-team league) as partial.
+    if not limit and len(games) < 150:
+        logger.warning(
+            "Results appear truncated ({} matches). Full season from Round 1 is not available from the results tab in the current markup.",
+            len(games),
+        )
     logger.info("Returning {} results", len(games))
     return games
