@@ -139,14 +139,24 @@ async def click_show_more(
         if max_clicks is not None and clicks >= max_clicks:
             logger.warning("Show more safety cap {} reached", max_clicks)
             break
+        # Scroll to bottom to reveal any lazy "Show more" controls
+        try:
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(300)
+        except Exception:
+            pass
         more = await find_first_locator(page, settings.selectors["show_more"], timeout=600)
         if not more:
             break
         before = await _match_count(page)
         try:
-            await more.click(timeout=800)
+            # Prefer a real click; fall back to force if the element is off-screen
+            try:
+                await more.click(timeout=800)
+            except Exception:
+                await more.click(timeout=800, force=True)
             clicks += 1
-            await page.wait_for_timeout(180)
+            await page.wait_for_timeout(400)
         except Exception:
             break
         if await _match_count(page) <= before:

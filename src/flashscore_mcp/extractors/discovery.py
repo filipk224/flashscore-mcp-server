@@ -54,41 +54,50 @@ async def list_countries(sport: str) -> List[Country]:
     countries: List[Country] = []
     async with browser_manager.new_page() as page:
         await safe_goto(page, url)
-        menu = await find_first_locator(page, settings.selectors["left_menu"], timeout=1500)
-        if menu:
-            try:
-                expands = menu.locator("button, [class*='expand'], [class*='toggle']")
-                count = await expands.count()
-                for i in range(min(count, 8)):
-                    try:
-                        await expands.nth(i).click(timeout=400)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        headers = await get_all_matching(page, settings.selectors["country_headers"] + [f"a[href*='/{sport_slug}/']"])
+        # Click "Show more" for full country list if present
+        try:
+            more = page.locator(".lmc__itemMore, [class*='itemMore'], a:has-text('Show more'), button:has-text('Show more')")
+            if await more.count() > 0:
+                await more.first.click(timeout=5000)
+                await page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        # Primary: country items in left menu
+        items = page.locator(".lmc__item")
+        count = await items.count()
         seen = set()
-        for h in headers[:80]:
+        for i in range(min(count, 300)):
             try:
-                text = (await h.inner_text()).strip()
-                href = await h.get_attribute("href") or ""
-                if not text or len(text) < 2 or len(text) > 40:
+                loc = items.nth(i)
+                text = (await loc.inner_text()).strip()
+                if not text or len(text) < 2 or len(text) > 50 or text.lower() in ("show more", "my teams", "rankings"):
                     continue
-                slug = text.lower().replace(" ", "-")
+                slug = text.lower().replace(" ", "-").replace("&", "and")
                 if slug in seen:
                     continue
                 seen.add(slug)
+                # Try to find href
+                href = ""
+                a = loc.locator("a").first
+                if await a.count() > 0:
+                    href = await a.get_attribute("href") or ""
                 full = urljoin(settings.base_url, href) if href else f"{url}{slug}/"
                 countries.append(Country(name=text.title(), slug=slug, url=full))
             except Exception:
                 continue
         if not countries:
+            # Fallback to known major ones
             countries = [
                 Country(name="World", slug="world", url=f"{url}world/"),
                 Country(name="England", slug="england", url=f"{url}england/"),
+                Country(name="Spain", slug="spain", url=f"{url}spain/"),
+                Country(name="Germany", slug="germany", url=f"{url}germany/"),
+                Country(name="Italy", slug="italy", url=f"{url}italy/"),
+                Country(name="France", slug="france", url=f"{url}france/"),
                 Country(name="Australia", slug="australia", url=f"{url}australia/"),
                 Country(name="USA", slug="usa", url=f"{url}usa/"),
             ]
+    logger.info("list_countries {} -> {}", sport_slug, len(countries))
     return countries
 
 _TAB_SLUGS = {"standings", "results", "fixtures", "draw", "news", "archive", "odds"}
