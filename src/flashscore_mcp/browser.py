@@ -74,13 +74,16 @@ async def safe_goto(page: Page, url: str, **kwargs) -> None:
         timeout=settings.nav_timeout_ms,
         **kwargs,
     )
+    # Longer, more specific wait for data-bearing elements, especially standings
+    selector = ".event__match, .ui-table, [id^='g_'], a[href*='/news/'], [class*='archive']"
+    if "standings" in url or "form" in url:
+        selector = ".ui-table, .ui-table__row"
     try:
-        await page.wait_for_selector(
-            ".event__match, .ui-table, [id^='g_'], a[href*='/news/'], [class*='archive']",
-            timeout=4000,
-        )
+        await page.wait_for_selector(selector, timeout=8000)
     except Exception:
-        pass
+        logger.debug("wait_for_selector timed out for {}", url)
+        # Extra short pause for JS hydration
+        await page.wait_for_timeout(1500)
 
 
 async def find_first_locator(page: Page, selector_list: List[str], timeout: int = 1500) -> Optional[Locator]:
