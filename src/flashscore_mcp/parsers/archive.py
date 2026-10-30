@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from ..models import Season
 
@@ -23,10 +24,16 @@ def parse_archive(html: str) -> list[Season]:
     return [season for season in seasons if season.name]
 
 
+def _norm(s: str) -> str:
+    return re.sub(r"[\s/\-]+", "", s.lower())
+
+
 def resolve_season(seasons: list[Season], season: str) -> tuple[str | None, list[str]]:
     names = [item.name for item in seasons]
     wanted = season.strip().lower()
+    wanted_norm = _norm(wanted)
     for item in seasons:
-        if item.name.lower() == wanted or wanted in item.name.lower():
+        name_l = item.name.lower()
+        if name_l == wanted or wanted in name_l or _norm(item.name) == wanted_norm or wanted_norm in _norm(item.name):
             return item.url, names
     return None, names
