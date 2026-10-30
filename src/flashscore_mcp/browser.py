@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, List, Optional
+from urllib.parse import urlparse
 
 from loguru import logger
 from playwright.async_api import async_playwright, Browser, Page, Locator
@@ -66,6 +67,29 @@ class BrowserManager:
 browser_manager = BrowserManager()
 
 
+# Tab content is hydrated after domcontentloaded. A header link such as News
+# is already in the shell, so the wait has to be tab-specific or standings and
+# results are read before the real rows exist.
+# (url fragment, selector, timeout ms or None to use nav_timeout_ms).
+# Odds cells are absent when the season is not current, so that wait is short.
+_TAB_READY = (
+    ("/standings", ".ui-table__row", None),
+    ("/form/", ".ui-table__row", None),
+    ("/results", ".event__match, [id^='g_']", None),
+    ("/fixtures", ".event__match, [id^='g_']", None),
+    ("/news/", '[data-testid="wcl-newsArticlePreview"]', None),
+    ("/odds", '[data-testid="wcl-oddsCell"]', 8000),
+)
+
+
+def _content_ready(url: str) -> tuple[str, int] | None:
+    lowered = url.lower()
+    for needle, selector, timeout in _TAB_READY:
+        if needle in lowered:
+            return selector, timeout or settings.nav_timeout_ms
+    return None
+
+
 @retry(stop=stop_after_attempt(2), wait=wait_fixed(0.4))
 async def safe_goto(page: Page, url: str, **kwargs) -> None:
     await page.goto(
@@ -74,16 +98,32 @@ async def safe_goto(page: Page, url: str, **kwargs) -> None:
         timeout=settings.nav_timeout_ms,
         **kwargs,
     )
-    # Longer, more specific wait for data-bearing elements, especially standings
-    selector = ".event__match, .ui-table, [id^='g_'], a[href*='/news/'], [class*='archive']"
-    if "standings" in url or "form" in url:
-        selector = ".ui-table, .ui-table__row"
+    landed = page.url or url
+    if "/archive" in landed.lower():
+        try:
+            await page.wait_for_function(
+                "() => document.documentElement.innerHTML.includes('league_archive_data')",
+                timeout=settings.nav_timeout_ms,
+            )
+        except Exception:
+            logger.debug("Archive payload not ready: {}", landed)
+        return
+    ready = _content_ready(landed)
+    if not ready:
+        # League summary URLs are /sport/country/league/ and the tab list
+        # is filled in after domcontentloaded.
+        parts = [part for part in urlparse(landed).path.strip("/").split("/") if part]
+        if len(parts) == 3:
+            try:
+                await page.wait_for_selector('[role="tab"]', timeout=8000)
+            except Exception:
+                logger.debug("League tabs not ready: {}", landed)
+        return
+    selector, timeout = ready
     try:
-        await page.wait_for_selector(selector, timeout=8000)
+        await page.wait_for_selector(selector, timeout=timeout)
     except Exception:
-        logger.debug("wait_for_selector timed out for {}", url)
-        # Extra short pause for JS hydration
-        await page.wait_for_timeout(1500)
+        logger.debug("Content not ready for {} ({})", landed, selector)
 
 
 async def find_first_locator(page: Page, selector_list: List[str], timeout: int = 1500) -> Optional[Locator]:
@@ -119,6 +159,28 @@ async def _match_count(page: Page) -> int:
         return 0
 
 
+async def _visible_show_more(page: Page) -> Optional[Locator]:
+    """The results shell also contains hidden 'Show more matches' links.
+
+    Those links sit in display:none summary blocks. Clicking the first match
+    in DOM order never loads older rounds, so only a visible control counts.
+    """
+    for sel in (
+        "a.event__more:visible",
+        "a:visible:has-text('Show more matches')",
+        "button:visible:has-text('Show more matches')",
+        "button:visible:has-text('Show more')",
+    ):
+        loc = page.locator(sel).first
+        try:
+            if await loc.count() > 0 and await loc.is_visible():
+                logger.debug("Show more selector: {}", sel)
+                return loc
+        except Exception:
+            continue
+    return None
+
+
 async def click_show_more(
     page: Page,
     max_clicks: Optional[int] = None,
@@ -145,18 +207,24 @@ async def click_show_more(
             await page.wait_for_timeout(300)
         except Exception:
             pass
-        more = await find_first_locator(page, settings.selectors["show_more"], timeout=600)
+        more = await _visible_show_more(page)
         if not more:
             break
         before = await _match_count(page)
         try:
-            # Prefer a real click; fall back to force if the element is off-screen
             try:
-                await more.click(timeout=800)
+                await more.click(timeout=2000)
             except Exception:
-                await more.click(timeout=800, force=True)
+                await more.click(timeout=2000, force=True)
             clicks += 1
-            await page.wait_for_timeout(400)
+            try:
+                await page.wait_for_function(
+                    """(before) => document.querySelectorAll(".event__match, [id^='g_']").length > before""",
+                    arg=before,
+                    timeout=8000,
+                )
+            except Exception:
+                pass
         except Exception:
             break
         if await _match_count(page) <= before:

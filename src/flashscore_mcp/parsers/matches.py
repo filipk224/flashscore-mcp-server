@@ -5,7 +5,9 @@ import re
 
 from ..models import MatchResult
 
-_ROW = re.compile(r'class="event__match ')
+# The last row of the list is class="event__match--last event__match ...".
+# Requiring event__match as the first class token drops that match.
+_ROW = re.compile(r'class="(?:[^"]*\s)?event__match(?:\s[^"]*)?"')
 _ROUND = re.compile(r'class="[^"]*event__round[^"]*"[^>]*>([^<]+)')
 _ROUND_TITLE = re.compile(r'class="[^"]*event__title[^"]*"[^>]*>([^<]+)')
 _DATE = re.compile(r"(\d{1,2}\.\d{1,2}\.?)\s*(\d{1,2}:\d{2})?")

@@ -21,27 +21,40 @@ KNOWN_SPORTS = [
     {"name": "American Football", "slug": "american-football", "url": f"{settings.base_url}/american-football/"},
 ]
 
+_SKIP_SLUGS = {"news", "favorites", "settings", "login"}
+
+
 async def list_sports() -> List[Sport]:
     sports: List[Sport] = []
     async with browser_manager.new_page() as page:
         await safe_goto(page, settings.base_url)
+        more = page.locator(".wclNavigation--scores button", has_text="MORE")
+        if await more.count():
+            try:
+                await more.first.click(timeout=2000)
+            except Exception:
+                logger.debug("Scores nav did not expand")
         links = await get_all_matching(page, settings.selectors["top_sports_links"])
         seen = set()
-        for loc in links[:40]:
+        for loc in links[:80]:
             try:
                 href = await loc.get_attribute("href") or ""
-                text = (await loc.inner_text()).strip()
-                if not href or not text or len(text) > 40:
+                label = " ".join((await loc.inner_text()).split())
+                if not href or not label or len(label) > 40:
                     continue
                 full = urljoin(settings.base_url, href)
                 path = urlparse(full).path.strip("/")
-                if "/" in path or not path:
+                if not path and label.lower() in {"football", "soccer"}:
+                    path = "football"
+                    full = f"{settings.base_url}/football/"
+                if not path or path.count("/") > 1:
                     continue
                 slug = path.lower()
-                if slug in seen or slug in ("news", "favorites", "settings", "login"):
+                if slug in seen or slug in _SKIP_SLUGS:
                     continue
                 seen.add(slug)
-                sports.append(Sport(name=text.title() if text.islower() else text, slug=slug, url=full.rstrip("/") + "/"))
+                name = label.title() if label.isupper() else label
+                sports.append(Sport(name=name, slug=slug, url=full.rstrip("/") + "/"))
             except Exception:
                 continue
         if not sports:

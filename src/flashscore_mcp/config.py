@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/126.0.0.0 Safari/537.36"
+        "Chrome/156.0.0.0 Safari/537.36"
     )
     browser_args: List[str] = [
         "--no-sandbox",
@@ -27,9 +27,9 @@ class Settings(BaseSettings):
 
     selectors: Dict[str, List[str]] = {
         "top_sports_links": [
+            ".wclNavigation--scores a[href]",
             "nav a[href^='/']",
             "header a[href*='/football/']",
-            "[class*='menu'] a[href^='/']",
         ],
         "left_menu": [
             "[class*='leftMenu']",

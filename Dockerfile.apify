@@ -5,7 +5,9 @@
 # The main Dockerfile is reserved for pure IaaS streamable-HTTP.
 # =============================================================================
 
-FROM apify/actor-python-playwright:3.12
+# Pin Playwright to the same release as requirements.txt. A floating :3.12 tag
+# ships a different browser build and chromium.launch fails at runtime.
+FROM apify/actor-python-playwright:3.12-1.64.1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
