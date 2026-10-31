@@ -14,16 +14,17 @@ async def fetch_html(
     until_count: Optional[int] = None,
     full: bool = False,
 ) -> str:
-    """show_more=None or full=True loads every page (button gone). Limited fetches pass until_count."""
+    """Expand match lists to until_count, or until Show more is gone.
+
+    show_more is only a switch. A number is not a click ceiling.
+    Standings and other non-match pages leave it at 0 and do not expand.
+    """
+    expand = full or show_more is None or until_count is not None or (show_more or 0) > 0
     async with browser_manager.new_page() as page:
         await safe_goto(page, url)
-        if full or show_more is None or until_count is not None or (show_more or 0) > 0:
-            await click_show_more(
-                page,
-                max_clicks=None if full or show_more is None else show_more,
-                until_count=until_count,
-            )
-            # Extra adaptive attempts: scroll the match container and re-check
+        if expand:
+            await click_show_more(page, until_count=until_count)
+            # The control can appear after the list container is scrolled.
             try:
                 await page.evaluate('''() => {
                     const c = document.querySelector('.leagues--static, .event--leagues, [class*="event--leagues"]');
@@ -31,7 +32,7 @@ async def fetch_html(
                     window.scrollTo(0, document.body.scrollHeight);
                 }''')
                 await page.wait_for_timeout(800)
-                await click_show_more(page, max_clicks=5, until_count=until_count)
+                await click_show_more(page, until_count=until_count)
             except Exception as e:
                 logger.debug("Adaptive scroll attempt failed: {}", e)
         return await page.content()

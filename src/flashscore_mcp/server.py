@@ -81,14 +81,18 @@ async def get_results_history(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """Results with date, teams, status, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live."""
+    """Results with date, teams, status, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live. Omit limit and since for the whole tab. limit is the newest N games. since is the oldest date to include."""
     return await results.get_results_history(league, season, mode, limit, since)
 
 
 @mcp.tool()
-async def get_upcoming_fixtures(league: str, limit: int = 20) -> List[Fixture]:
-    """Fixtures. Rows with a dash score."""
-    return await fixtures.get_upcoming_fixtures(league, limit)
+async def get_upcoming_fixtures(
+    league: str,
+    limit: Optional[int] = None,
+    since: Optional[str] = None,
+) -> List[Fixture]:
+    """Scheduled fixtures. Omit limit and since for every game. limit is the newest N games. since is the oldest date to include."""
+    return await fixtures.get_upcoming_fixtures(league, limit, since)
 
 
 @mcp.tool()
@@ -122,9 +126,14 @@ async def get_historical_standings(league: str, season: str) -> StandingsPage:
 
 
 @mcp.tool()
-async def get_historical_results(league: str, season: str, limit: Optional[int] = None) -> List[MatchResult]:
-    """Results for a named archive season, parsed with the same match row as the current season."""
-    return await results.get_results_history(league, season, "full", limit)
+async def get_historical_results(
+    league: str,
+    season: str,
+    limit: Optional[int] = None,
+    since: Optional[str] = None,
+) -> List[MatchResult]:
+    """Results for a named archive season, parsed with the same match row as the current season. Omit limit and since for the whole season. limit is the newest N games. since is the oldest date to include."""
+    return await results.get_results_history(league, season, "full", limit, since)
 
 
 async def _amain() -> None:

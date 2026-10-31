@@ -183,23 +183,18 @@ async def _visible_show_more(page: Page) -> Optional[Locator]:
 
 async def click_show_more(
     page: Page,
-    max_clicks: Optional[int] = None,
     until_count: Optional[int] = None,
 ) -> int:
-    """Click Show more until the button is gone.
+    """Click Show more until the caller has enough rows, or the button is gone.
 
-    until_count: stop early once that many matches are loaded (limited fetches only).
-    max_clicks: hard safety only. None means keep going until the button disappears.
-    Full season data is never cut short by a click cap.
+    until_count is the caller's own stop. There is no click ceiling.
+    A control that stays visible but adds no rows is a dead page, not a cap.
     """
     clicks = 0
     stale = 0
     while True:
         if until_count is not None and await _match_count(page) >= until_count:
             logger.info("Show more stopped: {} matches reached", until_count)
-            break
-        if max_clicks is not None and clicks >= max_clicks:
-            logger.warning("Show more safety cap {} reached", max_clicks)
             break
         # Scroll to bottom to reveal any lazy "Show more" controls
         try:

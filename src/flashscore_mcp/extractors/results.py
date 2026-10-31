@@ -11,6 +11,7 @@ from ..models import MatchResult
 from ..parsers.archive import parse_archive, resolve_season
 from ..parsers.matches import parse_matches
 from .fetch import fetch_html
+from .window import take_until
 
 
 def _league_url(league: str, season: str, tab: str) -> str:
@@ -46,28 +47,14 @@ async def get_results_history(
     since: Optional[str] = None,
 ) -> List[MatchResult]:
     url = await _season_tab_url(league, season, "results")
-    logger.info("get_results_history url={} mode={} limit={}", url, mode, limit)
+    logger.info("get_results_history url={} mode={} limit={} since={}", url, mode, limit, since)
     if not url:
         return []
-    # No limit = full season. Keep pressing Show more until the button is gone.
-    # A limit stops once that many matches are loaded, or the button is gone.
-    if limit is None:
-        html = await fetch_html(url, full=True)
-    else:
-        html = await fetch_html(url, show_more=None, until_count=limit)
-    games = parse_matches(html)
-    if since:
-        games = [game for game in games if not game.date or game.date > since]
-    if limit:
-        games = games[:limit]
-    # Adaptive note: Flashscore results tabs currently embed only the most recent
-    # rounds in the initial HTML/feed. A functional Show-more that expands the full
-    # season is not exposed in headless mode. Callers should treat counts well
-    # below a full season (e.g. < 200 for a 20-team league) as partial.
-    if not limit and len(games) < 150:
-        logger.warning(
-            "Results appear truncated ({} matches). Full season from Round 1 is not available from the results tab in the current markup.",
-            len(games),
-        )
+    # A date bound can sit further down the list than a raw row count, so load
+    # the whole tab and cut afterwards. A count alone stops once that many rows
+    # are on the page.
+    until_count = limit if limit is not None and not since else None
+    html = await fetch_html(url, full=True, until_count=until_count)
+    games = take_until(parse_matches(html), limit=limit, since=since)
     logger.info("Returning {} results", len(games))
     return games
