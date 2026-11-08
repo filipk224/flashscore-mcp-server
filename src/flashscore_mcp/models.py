@@ -62,6 +62,10 @@ class MatchResult(BaseModel):
     status: str = "finished"
     home_score: Optional[int] = None
     away_score: Optional[int] = None
+    match_id: Optional[str] = None
+    match_url: Optional[str] = None
+    minute: Optional[str] = None
+    competition: Optional[str] = None
     extras: dict = Field(default_factory=dict)
 
 
@@ -88,6 +92,8 @@ class Fixture(BaseModel):
     home_team: str
     away_team: str
     url: Optional[str] = None
+    match_id: Optional[str] = None
+    match_url: Optional[str] = None
 
 
 class NewsItem(BaseModel):
@@ -102,3 +108,54 @@ class Season(BaseModel):
     url: Optional[str] = None
     id: Optional[str] = None
     winner: Optional[str] = None
+
+
+class MatchIncident(BaseModel):
+    time: Optional[str] = None
+    team: Optional[str] = None
+    player: Optional[str] = None
+    kind: Optional[str] = None
+    score: Optional[str] = None
+    note: Optional[str] = None
+
+
+class MatchStat(BaseModel):
+    name: str
+    home: Optional[str] = None
+    away: Optional[str] = None
+
+
+class LineupPlayer(BaseModel):
+    name: str
+    team: Optional[str] = None
+    role: Optional[str] = None
+    number: Optional[str] = None
+
+
+class MatchCollection(BaseModel):
+    status: str = "ok"
+    reason: Optional[str] = None
+    items: list[MatchResult] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class MatchDetail(BaseModel):
+    status: str = "ok"
+    reason: Optional[str] = None
+    match_id: Optional[str] = None
+    match_url: Optional[str] = None
+    home_team: Optional[str] = None
+    away_team: Optional[str] = None
+    home_score: Optional[int] = None
+    away_score: Optional[int] = None
+    match_status: Optional[str] = None
+    minute: Optional[str] = None
+    date: Optional[str] = None
+    time: Optional[str] = None
+    competition: Optional[str] = None
+    summary: Optional[dict] = None
+    stats: Optional[list[MatchStat]] = None
+    incidents: Optional[list[MatchIncident]] = None
+    lineups: Optional[list[LineupPlayer]] = None
+    h2h: Optional[list[MatchResult]] = None
+    errors: dict[str, str] = Field(default_factory=dict)

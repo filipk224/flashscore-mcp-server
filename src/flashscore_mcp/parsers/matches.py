@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from ..config import settings
 from ..models import MatchResult
 
 # The last row of the list is class="event__match--last event__match ...".
@@ -72,17 +73,64 @@ def _one(chunk: str, preceding: str = "") -> MatchResult | None:
     if note:
         extras["note"] = note
     rnd = _round_from(preceding) or _round_from(chunk)
+    status = _status(chunk, stage, home_score, away_score)
+    match_id = _match_id(chunk, preceding)
     return MatchResult(
         date=date,
         time=time,
         round=rnd,
         home_team=home,
         away_team=away,
-        status=_status(chunk, stage, home_score, away_score),
+        status=status,
         home_score=home_score,
         away_score=away_score,
+        match_id=match_id,
+        match_url=_match_url(chunk, match_id),
+        minute=_minute(status, stage),
+        competition=_competition_from(preceding),
         extras=extras,
     )
+
+
+def _match_id(chunk: str, preceding: str = "") -> str | None:
+    # The id usually sits just before class="event__match", so it is in the
+    # preceding tail. Searching the whole chunk first can pick up the next row.
+    near = preceding[-120:] + chunk[:80]
+    found = list(re.finditer(r'id="g_\d+_([^"]+)"', near))
+    if found:
+        return found[-1].group(1)
+    return None
+
+
+def _match_url(chunk: str, match_id: str | None) -> str | None:
+    href = re.search(r'href="((?:https?://[^"]+)?/match/[^"#?]+)"', chunk)
+    if href:
+        path = href.group(1)
+        if path.startswith("http"):
+            return path.rstrip("/") + "/"
+        return settings.base_url.rstrip("/") + path
+    if match_id:
+        return f"{settings.base_url.rstrip('/')}/match/{match_id}/"
+    return None
+
+
+def _minute(status: str, stage: str) -> str | None:
+    if status != "live" or not stage or _DATE.search(stage):
+        return None
+    text = stage.strip()
+    return text or None
+
+
+def _competition_from(preceding: str) -> str | None:
+    titles = list(_ROUND_TITLE.finditer(preceding))
+    if not titles:
+        return None
+    text = " ".join(titles[-1].group(1).split())
+    if not text:
+        return None
+    if re.search(r"round|week|matchday", text, re.I) and ":" not in text:
+        return None
+    return text
 
 
 def _team(chunk: str, token: str) -> str | None:
