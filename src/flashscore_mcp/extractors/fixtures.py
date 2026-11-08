@@ -35,6 +35,9 @@ async def get_upcoming_fixtures(
             round=game.round,
             home_team=game.home_team,
             away_team=game.away_team,
+            url=game.match_url,
+            match_id=game.match_id,
+            match_url=game.match_url,
         )
         for game in take_until(games, limit=limit, since=since)
     ]

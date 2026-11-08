@@ -41,4 +41,4 @@ async def fetch_html(
     except LoadFailed:
         raise
     except Exception as exc:
-        raise LoadFailed(f"Failed to load {url}: {exc}") from exc
+        raise LoadFailed(f"Failed to load {url}: {exc}", reason="source-refused") from exc
