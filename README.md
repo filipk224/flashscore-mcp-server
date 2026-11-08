@@ -11,13 +11,14 @@ Supports:
 
 ## Features
 - Sports discovery via top menu
-- Countries & leagues via left menu (on-demand)
+- Countries & leagues via left menu (on-demand), with names like `NPB (Japan)`
+- League tools accept a name with its country (for example `Premier League (England)` or `NBA (USA)`) as well as a Flashscore path
 - News headings + links
-- Full results history (team names + PF/PA) with permanent/long-TTL caching
+- Full results history (team names, scores, and extras)
 - Upcoming fixtures
-- Current standings (MP, W, L, PF, PA, Form)
+- Current standings (played, wins, losses, points, form)
 - Previous seasons / archives
-- Rate limiting, retries, modular extractors, adaptable multi-fallback selectors
+- Modular extractors, a parser adapter for renamed site classes, and checks that tell empty pages apart from failed loads
 - Configurable via environment variables
 
 See [PRD.md](PRD.md) for full requirements.
@@ -58,8 +59,10 @@ The project is prepared for any Docker-compatible IaaS platform.
 
 ### Build & run locally with Docker
 ```bash
+export FLASHSCORE_MCP_TOKEN="$(openssl rand -hex 32)"
 docker compose up --build
-# MCP endpoint: http://localhost:8000/mcp
+# MCP endpoint: http://127.0.0.1:8000/mcp
+# Header: Authorization: Bearer $FLASHSCORE_MCP_TOKEN
 ```
 
 ### Deploy to common platforms
@@ -94,6 +97,7 @@ On every push to `main` (or manual run) it:
 | `RUMBLE_SSH_PRIVATE_KEY` | Yes | Full private key (PEM) |
 | `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
 | `GHCR_PULL_TOKEN` | No | Only needed if the GHCR package stays **private**. A classic PAT with `read:packages` |
+| `FLASHSCORE_MCP_TOKEN` | Yes | Shared bearer token (at least 16 characters). The HTTP server will not start without it. Generate with `openssl rand -hex 32`. |
 
 **Variable** (Settings → Secrets and variables → Actions → Variables):
 
@@ -113,7 +117,7 @@ Workflow logs print `TRYCLOUDFLARE_URL=https://<random>.trycloudflare.com` and `
 
 That hostname is **ephemeral**: it changes whenever the `flashscore-mcp-tunnel` container is recreated (every push to `main`). Point Grok at the latest `MCP_ENDPOINT` from the Actions log.
 
-The VM does **not** need inbound 8000 from the internet for the tunnel path. Keep SSH reachable for deploys.
+The Quick Tunnel stays free and only provides HTTPS. It does not authenticate callers. Every request, including `/health` and `/mcp`, must include `Authorization: Bearer <FLASHSCORE_MCP_TOKEN>`. Port 8000 is bound to localhost on the VM; the tunnel reaches the container over the Docker network, so the raw port is not published on the public internet.
 
 ### GHCR package visibility
 
@@ -132,8 +136,9 @@ sudo docker compose --env-file .env ps
 sudo docker compose --env-file .env logs -f --tail=100
 ```
 
-Local: `http://127.0.0.1:8000/mcp`  
-Public HTTPS: `https://<random>.trycloudflare.com/mcp` (from the deploy job’s `MCP_ENDPOINT`)
+Local (on the VM): `http://127.0.0.1:8000/mcp`  
+Public HTTPS: `https://<random>.trycloudflare.com/mcp` (from the deploy job’s `MCP_ENDPOINT`)  
+Both require `Authorization: Bearer <FLASHSCORE_MCP_TOKEN>`.
 
 ---
 
@@ -144,19 +149,34 @@ The project remains fully compatible with Apify Actors.
 - `.actor/actor.json` – metadata + `usesStandbyMode: true` + `webServerMcpPath: "/mcp"`
 - `src/main.py` – Apify-specific entrypoint
 
+The Apify entrypoint serves Streamable HTTP with `stateless_http` and `json_response` enabled, matching the generic IaaS server. Authentication is the platform Apify token, not `FLASHSCORE_MCP_TOKEN`. The Standby idle timeout is configured in the Actor Standby settings in Apify Console; the optional `idleTimeoutSecs` input is informational only.
+
 ### Deploy steps
 1. Install [Apify CLI](https://docs.apify.com/cli) and log in: `apify login`
 2. From the project root: `apify push`
-3. Enable Standby in the Actor settings
-4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with Apify token)
+3. Enable Standby in the Actor settings and set the idle timeout there if you want the instance to stay warm longer
+4. Clients connect to `https://<your-actor-id>.apify.actor/mcp` (with an Apify token)
 
 ---
 
 ## 5. Connecting from Grok (xAI)
 
-Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint. Use the `MCP_ENDPOINT` printed by the latest Rumble deploy (`https://<random>.trycloudflare.com/mcp`).
+Grok's remote MCP client expects a **publicly reachable HTTPS** endpoint. Use the `MCP_ENDPOINT` printed by the latest Rumble deploy (`https://<random>.trycloudflare.com/mcp`) and send the shared bearer token:
 
-The server is configured with `stateless_http=True`, `json_response=True`, and CORS that exposes `Mcp-Session-Id`.
+```json
+{
+  "mcpServers": {
+    "flashscore": {
+      "url": "https://<random>.trycloudflare.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <FLASHSCORE_MCP_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+The server is configured with `stateless_http=True`, `json_response=True`, CORS that exposes `Mcp-Session-Id`, and required bearer authentication.
 
 ## Project Structure
 ```
