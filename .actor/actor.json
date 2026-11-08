@@ -10,7 +10,7 @@
   },
   "dockerfile": "./Dockerfile.apify",
   "readme": "./README.md",
-  "input": "./.actor/INPUT_SCHEMA.json",
+  "input": "./INPUT_SCHEMA.json",
   "usesStandbyMode": true,
   "webServerMcpPath": "/mcp",
   "defaultMemoryMbytes": 2048,
