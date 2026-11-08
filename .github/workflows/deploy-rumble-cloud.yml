@@ -126,10 +126,13 @@ jobs:
             if command -v ufw >/dev/null 2>&1; then
               sudo ufw delete allow 8000/tcp || true
               sudo ufw delete allow 8000 || true
+              sudo ufw deny 8000/tcp || true
             fi
             while sudo iptables -D INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null; do
               :
             done
+            sudo iptables -C INPUT -p tcp --dport 8000 ! -i lo -j DROP 2>/dev/null || \
+              sudo iptables -I INPUT -p tcp --dport 8000 ! -i lo -j DROP || true
 
             echo "=== Disk space ==="
             df -h /
@@ -262,13 +265,23 @@ jobs:
             echo "PUBLIC_IP=${PUBLIC_IP}"
             echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com) with Authorization: Bearer <FLASHSCORE_MCP_TOKEN>."
 
+            echo "--- public :8000 should be closed ---"
+            # appleboy script_stop enables set -e. A refused public
+            # connect is the success case (exit 1), so do not use it as
+            # an if-test or a python -c one-liner with an interpolated IP.
+            public_port_rc=1
             if [ -n "$PUBLIC_IP" ]; then
-              echo "--- public :8000 should be closed ---"
-              if python3 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${PUBLIC_IP}',8000)); s.close()" 2>/dev/null; then
-                echo "WARNING: port 8000 is reachable on PUBLIC_IP (should be localhost-only)"
-              else
-                echo "PUBLIC_PORT_8000=closed"
-              fi
+              set +e
+              timeout 5 bash -c "echo >/dev/tcp/${PUBLIC_IP}/8000" </dev/null >/dev/null 2>&1
+              public_port_rc=$?
+              set -e
+            fi
+            if [ "$public_port_rc" -eq 0 ]; then
+              echo "WARNING: port 8000 is reachable on PUBLIC_IP (should be localhost-only)"
+              sudo iptables -C INPUT -p tcp --dport 8000 ! -i lo -j DROP 2>/dev/null || \
+                sudo iptables -I INPUT -p tcp --dport 8000 ! -i lo -j DROP || true
+            else
+              echo "PUBLIC_PORT_8000=closed"
             fi
 
             echo "--- MCP container logs (last 100 lines) ---"
