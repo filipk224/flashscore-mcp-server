@@ -1,0 +1,47 @@
+name: Deploy to Apify
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-apify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  push-actor:
+    name: Push Actor to Apify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check APIFY_TOKEN
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          if [ -z "${APIFY_TOKEN}" ]; then
+            echo "ERROR: APIFY_TOKEN secret is required. Add it under Settings → Secrets and variables → Actions."
+            echo "Create the token in Apify Console → Settings → API & Integrations."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Push Actor to Apify
+        id: push
+        uses: apify/push-actor-action@v1
+        with:
+          token: ${{ secrets.APIFY_TOKEN }}
+
+      - name: Print build details
+        run: |
+          echo "Build ${{ steps.push.outputs.build-id }} finished with status ${{ steps.push.outputs.build-status }}"
+          echo "Build number: ${{ steps.push.outputs.build-number }}"
