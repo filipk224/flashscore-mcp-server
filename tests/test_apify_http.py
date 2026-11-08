@@ -81,6 +81,32 @@ class ApifyHttpCompat(unittest.TestCase):
             self.assertIn("list_countries", descriptions["list_sports"])
             self.assertIn("get_match", descriptions["get_live_matches"])
             self.assertIn("match_id", descriptions["get_match"])
+            for tool in tools:
+                self.assertIn("outputSchema", tool, tool["name"])
+                schema = tool["outputSchema"]
+                self.assertEqual(schema.get("type"), "object")
+                self.assertIn("properties", schema)
+
+
+class ActorOutputSchema(unittest.TestCase):
+    def test_apify_output_schema_is_defined(self):
+        import json
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        actor = json.loads((root / ".actor" / "actor.json").read_text())
+        self.assertEqual(actor.get("output"), "./OUTPUT_SCHEMA.json")
+        schema = json.loads((root / ".actor" / "OUTPUT_SCHEMA.json").read_text())
+        self.assertEqual(schema["actorOutputSchemaVersion"], 1)
+        self.assertIn("mcpEndpoint", schema["properties"])
+        self.assertEqual(
+            schema["properties"]["mcpEndpoint"]["template"],
+            "{{run.containerUrl}}/mcp",
+        )
+        self.assertEqual(
+            schema["properties"]["health"]["template"],
+            "{{run.containerUrl}}/health",
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,20 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Flashscore MCP Server Output",
+  "description": "This Actor is a Standby MCP server. Structured sports data is returned from MCP tools over Streamable HTTP, not written to a dataset. Authenticate with an Apify API token as a Bearer token.",
+  "type": "object",
+  "properties": {
+    "mcpEndpoint": {
+      "type": "string",
+      "title": "MCP endpoint",
+      "description": "Streamable HTTP MCP endpoint. POST JSON-RPC here (initialize, tools/list, tools/call). Tools include list_sports, list_countries, list_leagues, get_league, get_standings, get_results_history, get_upcoming_fixtures, get_news, get_odds, list_archive_seasons, get_historical_standings, get_historical_results, get_match, get_live_matches, get_h2h, get_matches_by_day, and get_team_form. Each tool advertises a JSON output schema derived from the Pydantic response models.",
+      "template": "{{run.containerUrl}}/mcp"
+    },
+    "health": {
+      "type": "string",
+      "title": "Health",
+      "description": "JSON health check with status, service name, version, and mcp_endpoint.",
+      "template": "{{run.containerUrl}}/health"
+    }
+  }
+}
