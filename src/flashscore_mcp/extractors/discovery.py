@@ -124,6 +124,9 @@ async def list_leagues(sport: str, country: str) -> List[League]:
     from ..parsers.league import parse_menu_leagues
 
     html = await fetch_html(url)
+    from .page_status import empty_or_raise
+    from .resolve import country_label
+
     leagues: List[League] = []
     seen = set()
     for league in parse_menu_leagues(html):
@@ -135,6 +138,15 @@ async def list_leagues(sport: str, country: str) -> List[League]:
             continue
         seen.add(league.slug)
         full = urljoin(settings.base_url, league.url)
-        leagues.append(league.model_copy(update={"url": full, "sport": sport_slug, "country": country_slug}))
+        display = league.name
+        if country_slug and "(" not in display:
+            display = f"{display} ({country_label(country_slug)})"
+        leagues.append(
+            league.model_copy(
+                update={"url": full, "sport": sport_slug, "country": country_slug, "name": display}
+            )
+        )
+    if not leagues:
+        empty_or_raise(html, "leagues", leagues)
     logger.info("list_leagues {} / {} -> {}", sport_slug, country_slug, len(leagues))
     return leagues
