@@ -4,7 +4,7 @@
 
 Supports:
 - **Local stdio** (for desktop MCP clients)
-- **Apify Actor** (Standby + Streamable HTTP)
+- **Apify Actor** (Standby + Streamable HTTP, automated deploy via GitHub Actions on every push to `main`)
 - **General IaaS / cloud** (Railway, Fly.io, Render, DigitalOcean, AWS, Cloud Run, etc.)
 - **Rumble Cloud** (automated deploy via GitHub Actions on every push to `main`)
 - **Cloudflare Quick Tunnel** (`cloudflared` sidecar → `https://*.trycloudflare.com`) for HTTPS in front of the VM
@@ -151,7 +151,17 @@ The project remains fully compatible with Apify Actors.
 
 The Apify entrypoint serves Streamable HTTP with `stateless_http` and `json_response` enabled, matching the generic IaaS server. Authentication is the platform Apify token, not `FLASHSCORE_MCP_TOKEN`. The Standby idle timeout is configured in the Actor Standby settings in Apify Console; the optional `idleTimeoutSecs` input is informational only.
 
-### Deploy steps
+### Automated deploy
+
+On every push to `main`, [`.github/workflows/deploy-apify.yml`](.github/workflows/deploy-apify.yml) runs the official [`apify/push-actor-action`](https://github.com/apify/push-actor-action). That is the same as `apify push`: it uploads the Actor (using `Dockerfile.apify` from `.actor/actor.json`) and waits for the platform build to finish. You can also run **Deploy to Apify** manually from the Actions tab.
+
+1. In [Apify Console](https://console.apify.com/), go to Settings → API & Integrations and create an API token
+2. In this GitHub repo, add a secret named `APIFY_TOKEN` (Settings → Secrets and variables → Actions)
+3. Push to `main`, or dispatch the workflow by hand
+
+The first successful push creates or updates the Actor named `flashscore-mcp-server` on your Apify account.
+
+### Manual deploy
 1. Install [Apify CLI](https://docs.apify.com/cli) and log in: `apify login`
 2. From the project root: `apify push`
 3. Enable Standby in the Actor settings and set the idle timeout there if you want the instance to stay warm longer
@@ -181,6 +191,7 @@ The server is configured with `stateless_http=True`, `json_response=True`, CORS 
 ## Project Structure
 ```
 .github/workflows/
+  deploy-apify.yml           # CI/CD → Apify Actor push + build
   deploy-rumble-cloud.yml    # CI/CD → GHCR + Rumble + trycloudflare sidecar
 src/
   main.py                      # Apify entrypoint
