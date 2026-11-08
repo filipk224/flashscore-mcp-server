@@ -1,3 +1,5 @@
 PRD.md
-PRD-sample-extrcators.md
-.github
+PRD-sample-extractors.md
+PRD*.md
+tests/
+.github/
