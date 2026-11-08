@@ -20,6 +20,9 @@ Supports:
 - Previous seasons / archives
 - Modular extractors, a parser adapter for renamed site classes, and checks that tell empty pages apart from failed loads
 - Configurable via environment variables
+- Results and fixtures include `match_id` and `match_url`; pass either to `get_match` for summary, stats, incidents, lineups, and head-to-head
+- `get_live_matches` and `get_matches_by_day` list games by sport (optionally a league or day) without needing the league first
+- `get_team_form` and `get_h2h` cover pre-match context
 
 See [PRD.md](PRD.md) for full requirements.
 
@@ -96,7 +99,6 @@ On every push to `main` (or manual run) it:
 | `RUMBLE_SSH_USER` | Yes | SSH username (e.g. `ubuntu`) |
 | `RUMBLE_SSH_PRIVATE_KEY` | Yes | Full private key (PEM) |
 | `RUMBLE_SSH_PORT` | No | SSH port (default 22) |
-| `GHCR_PULL_TOKEN` | No | Only needed if the GHCR package stays **private**. A classic PAT with `read:packages` |
 | `FLASHSCORE_MCP_TOKEN` | Yes | Shared bearer token (at least 16 characters). The HTTP server will not start without it. Generate with `openssl rand -hex 32`. |
 
 **Variable** (Settings → Secrets and variables → Actions → Variables):
@@ -121,11 +123,7 @@ The Quick Tunnel stays free and only provides HTTPS. It does not authenticate ca
 
 ### GHCR package visibility
 
-Rumble Cloud VMs have no built-in “pull token”. Options:
-
-1. **Recommended without a PAT**: make the package public  
-   GitHub → Packages → `flashscore-mcp-server` → Package settings → Public.
-2. **Keep private**: classic PAT with `read:packages` as `GHCR_PULL_TOKEN`.
+The Rumble VM pulls `ghcr.io/filipk224/flashscore-mcp-server:latest` without a registry login, so that package needs to stay public (GitHub → Packages → `flashscore-mcp-server` → Package settings → Public).
 
 ### Verify after deploy
 
