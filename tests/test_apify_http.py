@@ -20,6 +20,11 @@ EXPECTED_TOOLS = {
     "get_odds",
     "get_historical_standings",
     "get_historical_results",
+    "get_match",
+    "get_live_matches",
+    "get_h2h",
+    "get_matches_by_day",
+    "get_team_form",
 }
 
 
@@ -68,8 +73,14 @@ class ApifyHttpCompat(unittest.TestCase):
                 headers=headers,
             )
             self.assertEqual(listed.status_code, 200)
-            names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+            tools = listed.json()["result"]["tools"]
+            names = {tool["name"] for tool in tools}
             self.assertEqual(names, EXPECTED_TOOLS)
+            descriptions = {tool["name"]: tool.get("description") or "" for tool in tools}
+            self.assertIn("get_match", descriptions["get_results_history"])
+            self.assertIn("list_countries", descriptions["list_sports"])
+            self.assertIn("get_match", descriptions["get_live_matches"])
+            self.assertIn("match_id", descriptions["get_match"])
 
 
 if __name__ == "__main__":
