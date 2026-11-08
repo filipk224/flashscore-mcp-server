@@ -149,6 +149,9 @@ jobs:
             cat docker-compose.yml
 
             echo "=== Pull + start ==="
+            # A leftover `docker login` on this VM can make GHCR return
+            # "denied" even when the package is public.
+            sudo docker logout ghcr.io >/dev/null 2>&1 || true
             sudo docker compose --env-file .env pull
             sudo docker compose --env-file .env up -d --force-recreate --remove-orphans
 
