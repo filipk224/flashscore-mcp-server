@@ -23,4 +23,7 @@ def parse_news(html: str) -> list[NewsItem]:
             continue
         seen.add(link)
         items.append(NewsItem(title=html_lib.unescape(title_m.group(1)), link=link))
-    return items
+    if items:
+        return items
+    from .adapter import parse_news_from_hrefs
+    return parse_news_from_hrefs(html, NewsItem)

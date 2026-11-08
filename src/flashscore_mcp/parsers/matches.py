@@ -17,7 +17,20 @@ _PART = re.compile(
 
 
 def parse_matches(html: str) -> list[MatchResult]:
+    games = _parse_matches_html(html)
+    if games:
+        return games
+    from .adapter import adapt_match_html
+    adapted = adapt_match_html(html)
+    if adapted != html:
+        return _parse_matches_html(adapted)
+    return []
+
+
+def _parse_matches_html(html: str) -> list[MatchResult]:
     marks = list(_ROW.finditer(html))
+    if not marks:
+        marks = list(re.finditer(r'id="g_\d+_[^"]+"', html))
     games: list[MatchResult] = []
     for index, mark in enumerate(marks):
         end = marks[index + 1].start() if index + 1 < len(marks) else min(len(html), mark.start() + 12000)
