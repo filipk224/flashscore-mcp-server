@@ -63,7 +63,7 @@ jobs:
           key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
           port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
           script_stop: true
-          envs: GHCR_TOKEN,GITHUB_ACTOR,FLASHSCORE_MCP_TOKEN
+          envs: FLASHSCORE_MCP_TOKEN
           script: |
             set -e
 
@@ -133,13 +133,6 @@ jobs:
 
             echo "=== Disk space ==="
             df -h /
-
-            echo "=== GHCR login ==="
-            if [ -n "${GHCR_TOKEN:-}" ]; then
-              echo "$GHCR_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-            else
-              echo "No GHCR_PULL_TOKEN; using public package"
-            fi
 
             DEPLOY_DIR=/opt/flashscore-mcp
             sudo mkdir -p "$DEPLOY_DIR"
@@ -280,6 +273,4 @@ jobs:
 
             echo "=== Deploy complete ==="
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
           FLASHSCORE_MCP_TOKEN: ${{ secrets.FLASHSCORE_MCP_TOKEN }}
