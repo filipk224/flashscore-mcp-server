@@ -25,8 +25,22 @@ async def main() -> None:
     async with Actor:
         Actor.log.info("Starting Flashscore MCP Server on Apify (Standby-ready)")
 
-        # Build the Streamable HTTP ASGI app from the existing FastMCP server
-        app = mcp.http_app(transport="streamable-http")
+        actor_input = await Actor.get_input() or {}
+        idle = actor_input.get("idleTimeoutSecs")
+        if idle is not None:
+            Actor.log.info(
+                "Received input idleTimeoutSecs={}. The platform Standby idle "
+                "timeout is set in the Actor Standby settings, not by this process.",
+                idle,
+            )
+
+        # Same Streamable HTTP flags as the generic IaaS server, so Grok and
+        # other remote clients do not need sticky sessions or mandatory SSE.
+        app = mcp.http_app(
+            transport="streamable-http",
+            stateless_http=True,
+            json_response=True,
+        )
 
         # Bind to the port Apify expects
         port = Actor.configuration.web_server_port
@@ -35,6 +49,7 @@ async def main() -> None:
             host="0.0.0.0",
             port=port,
             log_level="info",
+            timeout_keep_alive=75,
         )
         web_server = uvicorn.Server(config)
 

@@ -63,9 +63,21 @@ jobs:
           key: ${{ secrets.RUMBLE_SSH_PRIVATE_KEY }}
           port: ${{ secrets.RUMBLE_SSH_PORT || 22 }}
           script_stop: true
-          envs: GHCR_TOKEN,GITHUB_ACTOR
+          envs: GHCR_TOKEN,GITHUB_ACTOR,FLASHSCORE_MCP_TOKEN
           script: |
             set -e
+
+            if [ -z "${FLASHSCORE_MCP_TOKEN:-}" ]; then
+              echo "ERROR: FLASHSCORE_MCP_TOKEN secret is required. Add it under Settings → Secrets and variables → Actions."
+              exit 1
+            fi
+            case "${FLASHSCORE_MCP_TOKEN}" in
+              ????????????????*) ;;
+              *)
+                echo "ERROR: FLASHSCORE_MCP_TOKEN must be at least 16 characters."
+                exit 1
+                ;;
+            esac
 
             echo "=== Ensure Docker is installed ==="
             if ! command -v docker >/dev/null 2>&1; then
@@ -111,12 +123,14 @@ jobs:
             fi
             sudo docker compose version
 
-            echo "=== Open host firewall for TCP 8000 ==="
+            echo "=== Keep TCP 8000 off the public internet ==="
             if command -v ufw >/dev/null 2>&1; then
-              sudo ufw allow 8000/tcp || true
+              sudo ufw delete allow 8000/tcp || true
+              sudo ufw delete allow 8000 || true
             fi
-            sudo iptables -C INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null || \
-              sudo iptables -I INPUT -p tcp --dport 8000 -j ACCEPT || true
+            while sudo iptables -D INPUT -p tcp --dport 8000 -j ACCEPT 2>/dev/null; do
+              :
+            done
 
             echo "=== Disk space ==="
             df -h /
@@ -135,10 +149,10 @@ jobs:
 
             echo "=== Write .env ==="
             umask 077
-            : > .env
+            printf 'FLASHSCORE_MCP_TOKEN=%s\n' "$FLASHSCORE_MCP_TOKEN" > .env
 
             echo "=== Write docker-compose.yml (MCP + trycloudflare Quick Tunnel) ==="
-            COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjgwMDA6ODAwMCIKICAgIHNobV9zaXplOiAiMWdiIgogICAgaW5pdDogdHJ1ZQogICAgZW52aXJvbm1lbnQ6CiAgICAgIC0gUE9SVD04MDAwCiAgICAgIC0gSE9TVD0wLjAuMC4wCiAgICAgIC0gRkxBU0hTQ09SRV9IRUFETEVTUz10cnVlCiAgICAgIC0gRkxBU0hTQ09SRV9NQVhfQ09OQ1VSUkVOVF9QQUdFUz0yCiAgICAgIC0gTE9HX0xFVkVMPWluZm8KICAgICAgLSBGQVNUTUNQX0hPU1Q9MC4wLjAuMAogICAgICAtIEZBU1RNQ1BfUE9SVD04MDAwCiAgY2xvdWRmbGFyZWQ6CiAgICBpbWFnZTogY2xvdWRmbGFyZS9jbG91ZGZsYXJlZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBmbGFzaHNjb3JlLW1jcC10dW5uZWwKICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBjb21tYW5kOiB0dW5uZWwgLS1uby1hdXRvdXBkYXRlIC0tdXJsIGh0dHA6Ly9mbGFzaHNjb3JlLW1jcDo4MDAwCiAgICBkZXBlbmRzX29uOgogICAgICAtIGZsYXNoc2NvcmUtbWNwCg=='
+            COMPOSE_B64='c2VydmljZXM6CiAgZmxhc2hzY29yZS1tY3A6CiAgICBpbWFnZTogZ2hjci5pby9maWxpcGsyMjQvZmxhc2hzY29yZS1tY3Atc2VydmVyOmxhdGVzdAogICAgY29udGFpbmVyX25hbWU6IGZsYXNoc2NvcmUtbWNwCiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgcG9ydHM6CiAgICAgIC0gIjEyNy4wLjAuMTo4MDAwOjgwMDAiCiAgICBzaG1fc2l6ZTogIjFnYiIKICAgIGluaXQ6IHRydWUKICAgIGVudmlyb25tZW50OgogICAgICAtIFBPUlQ9ODAwMAogICAgICAtIEhPU1Q9MC4wLjAuMAogICAgICAtIEZMQVNIU0NPUkVfSEVBRExFU1M9dHJ1ZQogICAgICAtIEZMQVNIU0NPUkVfTUFYX0NPTkNVUlJFTlRfUEFHRVM9MgogICAgICAtIExPR19MRVZFTD1pbmZvCiAgICAgIC0gRkFTVE1DUF9IT1NUPTAuMC4wLjAKICAgICAgLSBGQVNUTUNQX1BPUlQ9ODAwMAogICAgICAtIEZMQVNIU0NPUkVfTUNQX1RPS0VOPSR7RkxBU0hTQ09SRV9NQ1BfVE9LRU59CiAgY2xvdWRmbGFyZWQ6CiAgICBpbWFnZTogY2xvdWRmbGFyZS9jbG91ZGZsYXJlZDpsYXRlc3QKICAgIGNvbnRhaW5lcl9uYW1lOiBmbGFzaHNjb3JlLW1jcC10dW5uZWwKICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBjb21tYW5kOiB0dW5uZWwgLS1uby1hdXRvdXBkYXRlIC0tdXJsIGh0dHA6Ly9mbGFzaHNjb3JlLW1jcDo4MDAwCiAgICBkZXBlbmRzX29uOgogICAgICAtIGZsYXNoc2NvcmUtbWNwCg=='
             echo "$COMPOSE_B64" | base64 -d > docker-compose.yml
             cat docker-compose.yml
 
@@ -168,11 +182,13 @@ jobs:
 
             echo "--- GET /health ---"
             curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
               http://127.0.0.1:8000/health || echo "health_failed=$?"
             echo
 
             echo "--- GET / ---"
             curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
               http://127.0.0.1:8000/ || echo "root_failed=$?"
             echo
 
@@ -180,6 +196,7 @@ jobs:
             curl -sS -D /tmp/mcp_headers.txt -o /tmp/mcp_body.txt -w "HTTP_CODE=%{http_code}\nTIME=%{time_total}s\n" \
               --connect-timeout 10 --max-time 30 \
               -X POST http://127.0.0.1:8000/mcp \
+              -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
               -H "Content-Type: application/json" \
               -H "Accept: application/json, text/event-stream" \
               -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
@@ -196,6 +213,7 @@ jobs:
               curl -sS -o /tmp/mcp_tools.txt -w "HTTP_CODE=%{http_code}\n" \
                 --connect-timeout 10 --max-time 30 \
                 -X POST http://127.0.0.1:8000/mcp \
+                -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -H "Accept: application/json, text/event-stream" \
                 -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' || true
@@ -227,12 +245,14 @@ jobs:
               echo "MCP_ENDPOINT=${TRYCLOUDFLARE_URL}/mcp"
               echo "--- trycloudflare GET /health ---"
               curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 15 --max-time 25 \
+                -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
                 "${TRYCLOUDFLARE_URL}/health" || echo "trycloudflare_health_failed=$?"
               echo
               echo "--- trycloudflare MCP initialize ---"
               curl -sS -o /tmp/mcp_cf.txt -w "HTTP_CODE=%{http_code}\n" \
                 --connect-timeout 15 --max-time 30 \
                 -X POST "${TRYCLOUDFLARE_URL}/mcp" \
+                -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -H "Accept: application/json, text/event-stream" \
                 -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"deploy-healthcheck","version":"1.0"}}}' \
@@ -245,14 +265,15 @@ jobs:
 
             PUBLIC_IP=$(curl -sS --connect-timeout 5 https://ifconfig.me 2>/dev/null || curl -sS --connect-timeout 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
             echo "PUBLIC_IP=${PUBLIC_IP}"
-            echo "HTTP_ENDPOINT=http://${PUBLIC_IP}:8000/mcp"
-            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com)."
+            echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com) with Authorization: Bearer <FLASHSCORE_MCP_TOKEN>."
 
             if [ -n "$PUBLIC_IP" ]; then
-              echo "--- external GET /health ---"
-              curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
-                "http://${PUBLIC_IP}:8000/health" || echo "ext_health_failed=$?"
-              echo
+              echo "--- public :8000 should be closed ---"
+              if python3 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${PUBLIC_IP}',8000)); s.close()" 2>/dev/null; then
+                echo "WARNING: port 8000 is reachable on PUBLIC_IP (should be localhost-only)"
+              else
+                echo "PUBLIC_PORT_8000=closed"
+              fi
             fi
 
             echo "--- MCP container logs (last 100 lines) ---"
@@ -262,3 +283,4 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+          FLASHSCORE_MCP_TOKEN: ${{ secrets.FLASHSCORE_MCP_TOKEN }}

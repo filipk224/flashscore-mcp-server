@@ -6,7 +6,7 @@
     "idleTimeoutSecs": {
       "title": "Idle timeout (seconds)",
       "type": "integer",
-      "description": "How long the Actor may stay idle in Standby mode before being shut down. Use a high value for always-on MCP access.",
+      "description": "Informational only: this process does not apply the value. Set the Standby idle timeout in the Actor Standby settings in Apify Console. Use a high value there for always-on MCP access.",
       "default": 3600,
       "minimum": 60,
       "maximum": 86400

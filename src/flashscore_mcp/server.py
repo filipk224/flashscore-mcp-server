@@ -24,7 +24,7 @@ from .models import (
 from .extractors import archive, discovery, fixtures, league_info, news, odds, results, standings
 from . import __version__
 
-mcp = FastMCP("flashscore-mcp")
+mcp = FastMCP("flashscore-mcp", version=__version__)
 
 
 @mcp.custom_route("/", methods=["GET"])
@@ -63,13 +63,13 @@ async def list_countries(sport: str) -> List[Country]:
 
 @mcp.tool()
 async def list_leagues(sport: str, country: str) -> List[League]:
-    """List leagues for sport + country (left menu, on-demand)."""
+    """List leagues for sport + country (left menu, on-demand). Names include the country, such as 'NPB (Japan)'."""
     return await discovery.list_leagues(sport, country)
 
 
 @mcp.tool()
 async def get_standings(league: str, season: str = "current", view: str = "overall") -> StandingsPage:
-    """Standings for a league. Shared columns are played, wins, draws, losses, table_points, and form. Other columns are in extras. view is overall, home, or form."""
+    """Standings for a league. Shared columns are played, wins, draws, losses, table_points, and form. Other columns are in extras. view is overall, home, or form. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await standings.get_standings(league, season, view)
 
 
@@ -81,7 +81,7 @@ async def get_results_history(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """Results with date, teams, status, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live. Omit limit and since for the whole tab. limit is the newest N games. since is the oldest date to include."""
+    """Results with date, teams, status, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live. Omit limit and since for the whole tab. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await results.get_results_history(league, season, mode, limit, since)
 
 
@@ -91,37 +91,37 @@ async def get_upcoming_fixtures(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[Fixture]:
-    """Scheduled fixtures. Omit limit and since for every game. limit is the newest N games. since is the oldest date to include."""
+    """Scheduled fixtures. Omit limit and since for every game. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await fixtures.get_upcoming_fixtures(league, limit, since)
 
 
 @mcp.tool()
 async def get_news(league: str, limit: int = 10) -> List[NewsItem]:
-    """News titles and links."""
+    """News titles and links. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await news.get_news(league, limit)
 
 
 @mcp.tool()
 async def list_archive_seasons(league: str) -> List[Season]:
-    """Seasons from league_archive_data, including the winner when the page has one."""
+    """Seasons from league_archive_data, including the winner when the page has one. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await archive.list_archive_seasons(league)
 
 
 @mcp.tool()
 async def get_league(league: str) -> LeagueInfo:
-    """Sport, country, name, season, url, tabs, and archive seasons for one league."""
+    """Sport, country, name, season, url, tabs, and archive seasons for one league. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await league_info.get_league(league)
 
 
 @mcp.tool()
 async def get_odds(league: str, season: str = "current") -> list[OddsPrice]:
-    """Default odds tab: bookmaker, side, and price. An archived season with no Odds tab returns an empty list."""
+    """Default odds tab: bookmaker, side, and price. An archived season with no Odds tab returns an empty list. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await odds.get_odds(league, season)
 
 
 @mcp.tool()
 async def get_historical_standings(league: str, season: str) -> StandingsPage:
-    """Standings for a named archive season. The table layout matches the current season."""
+    """Standings for a named archive season. The table layout matches the current season. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await standings.get_standings(league, season)
 
 
@@ -132,7 +132,7 @@ async def get_historical_results(
     limit: Optional[int] = None,
     since: Optional[str] = None,
 ) -> List[MatchResult]:
-    """Results for a named archive season, parsed with the same match row as the current season. Omit limit and since for the whole season. limit is the newest N games. since is the oldest date to include."""
+    """Results for a named archive season, parsed with the same match row as the current season. Omit limit and since for the whole season. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league."""
     return await results.get_results_history(league, season, "full", limit, since)
 
 

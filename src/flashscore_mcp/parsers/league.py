@@ -46,4 +46,7 @@ def parse_menu_leagues(html: str) -> list[League]:
         sport = parts[0] if parts else None
         country = parts[1] if len(parts) > 1 else None
         found.append(League(name=name, slug=slug, url=href, sport=sport, country=country))
-    return found
+    if found:
+        return found
+    from .adapter import parse_menu_leagues_from_hrefs
+    return parse_menu_leagues_from_hrefs(html, League)
