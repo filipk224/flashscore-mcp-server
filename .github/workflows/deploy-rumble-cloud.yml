@@ -71,13 +71,12 @@ jobs:
               echo "ERROR: FLASHSCORE_MCP_TOKEN secret is required. Add it under Settings → Secrets and variables → Actions."
               exit 1
             fi
-            case "${FLASHSCORE_MCP_TOKEN}" in
-              ????????????????*) ;;
-              *)
-                echo "ERROR: FLASHSCORE_MCP_TOKEN must be at least 16 characters."
-                exit 1
-                ;;
-            esac
+            # Do not use a case statement here: appleboy/ssh-action runs the
+            # script via bash -c and treats the case terminator as a syntax error.
+            if [ "$(printf '%s' "$FLASHSCORE_MCP_TOKEN" | wc -c)" -lt 16 ]; then
+              echo "ERROR: FLASHSCORE_MCP_TOKEN must be at least 16 characters."
+              exit 1
+            fi
 
             echo "=== Ensure Docker is installed ==="
             if ! command -v docker >/dev/null 2>&1; then
