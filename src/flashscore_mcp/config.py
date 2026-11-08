@@ -18,7 +18,6 @@ class Settings(BaseSettings):
         "--disable-gpu",
     ]
     nav_timeout_ms: int = 25000
-    min_delay_s: float = 0.0
     max_concurrent_pages: int = 4
     base_url: str = "https://www.flashscore.com"
     port: int = 8000

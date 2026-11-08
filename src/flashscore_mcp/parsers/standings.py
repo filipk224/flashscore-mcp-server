@@ -23,6 +23,17 @@ _CELL = re.compile(r'class="([^"]*\btable__cell\b[^"]*)"')
 
 
 def parse_standings(html: str) -> StandingsPage:
+    page = _parse_standings_html(html)
+    if page.sections or page.kind == "draw":
+        return page
+    from .adapter import adapt_standings_html
+    adapted = adapt_standings_html(html)
+    if adapted != html:
+        return _parse_standings_html(adapted)
+    return page
+
+
+def _parse_standings_html(html: str) -> StandingsPage:
     tables = _tables(html)
     sections: list[StandingSection] = []
     for table in tables:
