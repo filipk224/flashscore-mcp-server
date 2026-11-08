@@ -8,6 +8,10 @@ from loguru import logger
 class LoadFailed(RuntimeError):
     """The page did not load or could not be parsed; this is not an empty result."""
 
+    def __init__(self, message: str, reason: str = "parse-failed"):
+        super().__init__(message)
+        self.reason = reason
+
 
 _EMPTY_HINTS = (
     "no matches",
@@ -48,7 +52,7 @@ def classify_page(html: str, *, tab: str, parsed_count: int, raw_hints: int = 0)
         return "failed"
     if any(hint in low for hint in _EMPTY_HINTS):
         return "empty"
-    if tab in {"results", "fixtures"}:
+    if tab in {"results", "fixtures", "live", "day", "team", "h2h", "match"}:
         has_shell = bool(
             re.search(r'id="live-table"|event--leagues|leagues--static|sportName', text)
         )
@@ -76,14 +80,31 @@ def classify_page(html: str, *, tab: str, parsed_count: int, raw_hints: int = 0)
     return "failed"
 
 
+def page_outcome(html: str, *, tab: str, parsed_count: int, raw_hints: int = 0) -> tuple[str, str | None]:
+    """Return (status, reason) with named empty/failure reasons."""
+    status = classify_page(html, tab=tab, parsed_count=parsed_count, raw_hints=raw_hints)
+    if status == "ok":
+        return "ok", None
+    if status == "empty":
+        if tab in {"results", "fixtures", "live", "day", "team", "h2h", "match"}:
+            return "empty", "no-matches-scheduled"
+        return "empty", "no-data"
+    text = html or ""
+    low = text.lower()
+    if len(text) < 1500 or "flashscore" not in low or any(hint in low for hint in _FAIL_HINTS):
+        return "failed", "source-refused"
+    return "failed", "parse-failed"
+
+
 def empty_or_raise(html: str, tab: str, items, raw_hints: int = 0):
-    status = classify_page(html, tab=tab, parsed_count=len(items), raw_hints=raw_hints)
+    status, reason = page_outcome(html, tab=tab, parsed_count=len(items), raw_hints=raw_hints)
     if status == "failed":
-        logger.error("Failed to load {} (not an empty result); raw_hints={}", tab, raw_hints)
+        logger.error("Failed to load {} (not an empty result); reason={} raw_hints={}", tab, reason, raw_hints)
         raise LoadFailed(
             f"Failed to load {tab}: the page did not contain usable {tab} data. "
-            "This is a failed load, not an empty result."
+            "This is a failed load, not an empty result.",
+            reason=reason or "parse-failed",
         )
     if status == "empty":
-        logger.info("{} page loaded successfully but has no data", tab.capitalize())
+        logger.info("{} page loaded successfully but has no data ({})", tab.capitalize(), reason)
     return items
