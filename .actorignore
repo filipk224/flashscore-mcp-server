@@ -1,0 +1,4 @@
+PRD.md
+PRD-sample-extractors.md
+tests/*.py
+.github
