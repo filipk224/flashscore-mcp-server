@@ -41,7 +41,16 @@ jobs:
             sudo docker compose --env-file .env up -d --remove-orphans
             sudo docker compose --env-file .env ps
             sleep 10
+            set -a
+            # shellcheck disable=SC1091
+            . ./.env
+            set +a
+            if [ -z "${FLASHSCORE_MCP_TOKEN:-}" ]; then
+              echo "ERROR: FLASHSCORE_MCP_TOKEN missing from .env"
+              exit 1
+            fi
             curl -sS -w "\nHTTP_CODE=%{http_code}\n" --connect-timeout 10 --max-time 15 \
+              -H "Authorization: Bearer ${FLASHSCORE_MCP_TOKEN}" \
               http://127.0.0.1:8000/health || echo "health_failed=$?"
             sudo docker logs --tail=40 flashscore-mcp-tunnel 2>&1 || true
             echo "=== Recover complete ==="

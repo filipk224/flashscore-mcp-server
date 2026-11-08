@@ -1,11 +1,14 @@
 # Local testing of the IaaS / streamable-HTTP container
 # Usage:
+#   export FLASHSCORE_MCP_TOKEN='<at least 16 characters>'
 #   docker compose up --build
-# MCP: http://localhost:8000/mcp
+# MCP: http://127.0.0.1:8000/mcp
+# Clients must send: Authorization: Bearer $FLASHSCORE_MCP_TOKEN
 #
 # Optional Cloudflare Quick Tunnel (free trycloudflare.com hostname):
 #   docker compose --profile tunnel up --build
 # Public URL is printed in flashscore-mcp-tunnel logs and rotates on restart.
+# The tunnel is HTTPS only; the bearer token is still required.
 
 services:
   flashscore-mcp:
@@ -13,15 +16,15 @@ services:
     image: flashscore-mcp-server:local
     container_name: flashscore-mcp
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     shm_size: "1gb"
     environment:
       - PORT=8000
       - HOST=0.0.0.0
       - FLASHSCORE_HEADLESS=true
       - FLASHSCORE_MAX_CONCURRENT_PAGES=2
-      - FLASHSCORE_MIN_DELAY_S=1.8
       - LOG_LEVEL=info
+      - FLASHSCORE_MCP_TOKEN=${FLASHSCORE_MCP_TOKEN}
     restart: unless-stopped
 
   cloudflared:
