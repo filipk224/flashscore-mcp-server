@@ -8,13 +8,12 @@ from loguru import logger
 
 from ..config import settings
 from ..models import StandingsPage
-from ..parsers.archive import parse_archive, resolve_season
 from ..parsers.standings import parse_standings
 from ..parsers.adapter import count_standings_hints
 from .fetch import fetch_html
 from .page_status import empty_or_raise
 from .resolve import resolve_league_ref
-from .results import _league_url
+from .results import _league_url, resolve_archive_season
 
 _VIEW_TAIL = {
     "overall": "/standings/overall/",
@@ -35,15 +34,13 @@ def _view_url(html: str, view: str) -> str | None:
 async def get_standings(league: str, season: str = "current", view: str = "overall") -> StandingsPage:
     league = await resolve_league_ref(league)
     url = _league_url(league, "current", "standings")
-    logger.info("get_standings url={} season={} view={}", url, season, view)
-    html = await fetch_html(url)
     if season not in ("current", "", None):
-        seasons = parse_archive(html)
-        target, names = resolve_season(seasons, season)
+        target, names = await resolve_archive_season(league, season)
         if not target:
             return StandingsPage(kind="unknown-season", available_seasons=names)
         url = urljoin(settings.base_url, target).rstrip("/") + "/standings/"
-        html = await fetch_html(url)
+    logger.info("get_standings url={} season={} view={}", url, season, view)
+    html = await fetch_html(url)
     found = _view_url(html, view)
     if view != "overall" and found:
         html = await fetch_html(urljoin(settings.base_url, found))
