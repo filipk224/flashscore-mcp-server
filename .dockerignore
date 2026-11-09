@@ -1,5 +1,8 @@
-PRD.md
-PRD-sample-extractors.md
+.actor/
 PRD*.md
 tests/
 .github/
+.actorignore
+.dockerignore
+Dockerfile.apify
+mise.toml

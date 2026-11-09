@@ -1,5 +1,8 @@
 # Sample Extractors Implementation Plan
 
+> **Status (2026-11-09):** Implemented. Do not re-run this plan. The sample-extractor work landed; later match tools, HTTP authentication, and deploys are recorded in `docs/superpowers/plans/2026-11-09-match-tools-auth-and-deploys.md` and specified in `docs/superpowers/specs/2026-11-09-flashscore-mcp-server-design.md`.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Teach `flashscore-mcp-server` to return the statistics on the saved Flashscore pages, using one standings parser and one match parser, plus league identity and the default odds market.
