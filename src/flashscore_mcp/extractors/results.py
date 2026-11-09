@@ -32,11 +32,22 @@ def _league_url(league: str, season: str, tab: str) -> str:
     return f"{settings.base_url}/{key}/{tab}/" if tab else f"{settings.base_url}/{key}/"
 
 
+async def resolve_archive_season(league: str, season: str) -> tuple[str | None, list[str]]:
+    """Archive season URL from the league's /archive/ page.
+
+    league_archive_data is server-rendered, so the archive page is ready at
+    DOMContentLoaded. The old lookup loaded the current standings page and
+    waited for its table to hydrate first, which was the slow half of every
+    historical call.
+    """
+    html = await fetch_html(_league_url(league, "current", "archive"))
+    return resolve_season(parse_archive(html), season)
+
+
 async def _season_tab_url(league: str, season: str, tab: str) -> str | None:
     if season in ("current", "", None):
         return _league_url(league, "current", tab)
-    html = await fetch_html(_league_url(league, "current", "standings"))
-    target, _names = resolve_season(parse_archive(html), season)
+    target, _names = await resolve_archive_season(league, season)
     if not target:
         return None
     return urljoin(settings.base_url, target).rstrip("/") + f"/{tab}/"

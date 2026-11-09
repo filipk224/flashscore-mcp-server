@@ -11,7 +11,8 @@ from ..config import settings
 from ..models import MatchCollection, MatchResult
 from ..parsers.adapter import count_match_hints
 from ..parsers.matches import parse_matches
-from .fetch import fetch_html
+from ..parsers.feed import merge_rows, parse_day_feed
+from .fetch import DayPage, fetch_day, fetch_html
 from .page_status import LoadFailed, page_outcome
 from .resolve import parse_name_and_country, resolve_league_ref
 from .results import _league_url
@@ -115,11 +116,25 @@ def matches_league(game: MatchResult, league: str, resolved: Optional[str] = Non
     return False if needles else True
 
 
-def _sport_day_url(sport: str, day_offset: int) -> str:
-    base = f"{settings.base_url.rstrip('/')}/{quote(sport, safe='-')}/"
-    if day_offset == 0:
-        return base
-    return f"{base}?d={day_offset}"
+# The day picker on a sport page reaches a week either side of today.
+MAX_PICKER_DAYS = 7
+
+
+def _sport_day_url(sport: str, day_offset: int = 0) -> str:
+    """Sport landing page. The day is chosen with the picker, not a query."""
+    return f"{settings.base_url.rstrip('/')}/{quote(sport, safe='-')}/"
+
+
+def _day_items(day: DayPage, league_path: Optional[str] = None) -> tuple[list[MatchResult], list[MatchResult]]:
+    """(merged games, rendered rows) for one day page."""
+    rendered = parse_matches(day.html)
+    feed = parse_day_feed(day.feed, league_path) if day.feed else []
+    if league_path and feed:
+        ids = {game.match_id for game in feed}
+        rendered = [game for game in rendered if game.match_id in ids]
+    elif league_path and not feed:
+        rendered = []
+    return merge_rows(feed, rendered), rendered
 
 
 async def _optional_league_path(league: Optional[str], country: Optional[str]) -> Optional[str]:
@@ -164,18 +179,16 @@ async def get_live_matches(
 ) -> MatchCollection:
     sport = normalize_sport(sport)
     resolved = await _optional_league_path(league, country)
-    if resolved:
-        url = _league_url(resolved, "current", "")
-        logger.info("get_live_matches league url={}", url)
-        html = await fetch_html(url, full=True)
-        parsed = parse_matches(html)
-        items = [game for game in parsed if game.status == "live"]
-        return _after_filter(html, items, parsed, "live")
-
-    url = _sport_day_url(sport, 0)
-    logger.info("get_live_matches sport url={}", url)
-    html = await fetch_html(url, full=True)
-    parsed = parse_matches(html)
+    day_sport = sport
+    if resolved and not resolved.startswith("http"):
+        day_sport = resolved.strip("/").split("/")[0] or sport
+    url = _sport_day_url(day_sport, 0)
+    logger.info("get_live_matches url={} league={}", url, resolved)
+    day = await fetch_day(url, 0, live_tab=True)
+    html = day.html
+    parsed, _rendered = _day_items(day, resolved)
+    if resolved and day.feed and not parsed:
+        return MatchCollection(status="empty", reason="no-matches-scheduled", items=[])
     items = [game for game in parsed if game.status == "live"]
     if country:
         items = [game for game in items if matches_league(game, country, None) or (
@@ -196,6 +209,32 @@ async def get_matches_by_day(
     offset = resolve_day_offset(day_offset, date)
     target = _target_date(offset)
     resolved = await _optional_league_path(league, None)
+
+    if abs(offset) <= MAX_PICKER_DAYS:
+        day_sport = sport
+        if resolved and not resolved.startswith("http"):
+            day_sport = resolved.strip("/").split("/")[0] or sport
+        url = _sport_day_url(day_sport, offset)
+        logger.info("get_matches_by_day url={} offset={} league={}", url, offset, resolved)
+        day = await fetch_day(url, offset)
+        if offset != 0 and not day.feed and not _label_matches(day.label, target):
+            raise LoadFailed(
+                f"Could not switch the {day_sport} page to {target.isoformat()} "
+                f"(day picker showed {day.label!r}).",
+                reason="parse-failed",
+            )
+        parsed, _rendered = _day_items(day, resolved)
+        if day.feed:
+            # A day feed also carries late games from the evening before and
+            # early ones after midnight; keep only the requested date.
+            parsed = [game for game in parsed if _same_day(game, target)]
+        items = filter_status(parsed, wanted_status)
+        if items:
+            return MatchCollection(status="ok", items=items)
+        if day.feed or parsed:
+            # The day loaded; that league or status simply has no games.
+            return MatchCollection(status="empty", reason="no-matches-scheduled", items=[])
+        return _collection(day.html, [], "day")
 
     if resolved:
         results_url = _league_url(resolved, "current", "results")
@@ -236,15 +275,16 @@ async def get_matches_by_day(
             empty.status = "partial" if empty.status == "ok" else empty.status
         return empty
 
-    url = _sport_day_url(sport, offset)
-    logger.info("get_matches_by_day url={}", url)
-    html = await fetch_html(url, full=True)
-    parsed = parse_matches(html)
-    items = parsed
-    if league:
-        items = [game for game in items if matches_league(game, league, resolved)]
-    items = filter_status(items, wanted_status)
-    return _after_filter(html, items, parsed, "day")
+    raise ValueError(
+        f"Flashscore's day picker covers {MAX_PICKER_DAYS} days either side of today. "
+        "For an older or later date pass a league, which reads that league's results and fixtures."
+    )
+
+
+def _label_matches(label: Optional[str], target: date) -> bool:
+    if not label:
+        return False
+    return target.strftime("%B") in label and str(target.day) in label
 
 
 def _same_day(game: MatchResult, target: date) -> bool:
