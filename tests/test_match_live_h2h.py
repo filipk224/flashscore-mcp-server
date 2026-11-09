@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from flashscore_mcp.extractors import live, match as match_ext, team
+from flashscore_mcp.extractors.fetch import DayPage
+from flashscore_mcp.extractors.match_page import MatchPage
 from flashscore_mcp.extractors.match_ref import resolve_match_ref, section_url
 from flashscore_mcp.extractors.page_status import LoadFailed, page_outcome
 from flashscore_mcp.extractors.team import parse_search_team_paths
@@ -184,19 +186,27 @@ class MatchDetailParsers(unittest.TestCase):
         self.assertEqual(h2h[0].match_id, "HhHh1111")
 
 
+def _match_page(errors=None, **html) -> MatchPage:
+    page = MatchPage()
+    page.url = "https://www.flashscore.com/match/football/arsenal-x/chelsea-y/?mid=AbCd1234"
+    page.html = {key: _pad("<html>flashscore " + value + "</html>") for key, value in html.items()}
+    page.errors = dict(errors or {})
+    return page
+
+
 class GetMatchTool(unittest.TestCase):
     def test_partial_result_when_one_section_fails(self):
-        async def fake_fetch(url, *args, **kwargs):
-            if "match-statistics" in url:
-                raise LoadFailed("stats down", reason="source-refused")
-            if "lineups" in url:
-                return _pad("<html>flashscore " + LINEUPS_HTML + "</html>")
-            if "h2h" in url:
-                return _pad("<html>flashscore " + H2H_HTML + "</html>")
-            return _pad("<html>flashscore " + SUMMARY_HTML + "</html>")
+        async def fake_load(url, sections, h2h_more=0, **kwargs):
+            self.assertEqual(list(sections), ["summary", "stats", "lineups", "h2h"])
+            return _match_page(
+                errors={"stats": "source-refused"},
+                summary=SUMMARY_HTML,
+                lineups=LINEUPS_HTML,
+                h2h=H2H_HTML,
+            )
 
         async def run() -> None:
-            with patch("flashscore_mcp.extractors.match.fetch_html", side_effect=fake_fetch):
+            with patch("flashscore_mcp.extractors.match.load_match_page", side_effect=fake_load):
                 detail = await match_ext.get_match("AbCd1234")
             self.assertEqual(detail.status, "partial")
             self.assertEqual(detail.reason, "section-failed")
@@ -213,7 +223,7 @@ class LiveAndDay(unittest.TestCase):
     def test_live_filter_and_league_header(self):
         async def run() -> None:
             html = _pad("<html>flashscore " + MATCH_ROW + "</html>")
-            with patch("flashscore_mcp.extractors.live.fetch_html", return_value=html):
+            with patch("flashscore_mcp.extractors.live.fetch_day", return_value=DayPage(html=html)):
                 result = await live.get_live_matches("football")
             self.assertEqual(result.status, "ok")
             self.assertEqual(len(result.items), 1)
@@ -225,7 +235,7 @@ class LiveAndDay(unittest.TestCase):
     def test_day_listing_status_filter(self):
         async def run() -> None:
             html = _pad("<html>flashscore " + MATCH_ROW + "</html>")
-            with patch("flashscore_mcp.extractors.live.fetch_html", return_value=html):
+            with patch("flashscore_mcp.extractors.live.fetch_day", return_value=DayPage(html=html)):
                 scheduled = await live.get_matches_by_day("football", day_offset=0, status="scheduled")
                 finished = await live.get_matches_by_day("soccer", day_offset=0, status="finished")
             self.assertEqual([game.home_team for game in scheduled.items], ["Spurs"])
@@ -241,11 +251,11 @@ class LiveAndDay(unittest.TestCase):
 
 class HeadToHeadAndForm(unittest.TestCase):
     def test_h2h_from_match_respects_last_n(self):
-        async def fake_fetch(url, *args, **kwargs):
-            return _pad("<html>flashscore " + H2H_HTML + "</html>")
+        async def fake_load(url, sections, h2h_more=0, **kwargs):
+            return _match_page(h2h=H2H_HTML)
 
         async def run() -> None:
-            with patch("flashscore_mcp.extractors.match.fetch_html", side_effect=fake_fetch):
+            with patch("flashscore_mcp.extractors.match.load_match_page", side_effect=fake_load):
                 result = await match_ext.get_h2h(match="AbCd1234", last_n=1)
             self.assertEqual(len(result.items), 1)
             self.assertEqual(result.items[0].home_score, 5)
