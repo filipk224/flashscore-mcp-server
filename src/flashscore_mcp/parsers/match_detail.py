@@ -40,7 +40,7 @@ def _pair_scores(texts: list[str]) -> tuple[int | None, int | None]:
     return None, None
 
 
-def parse_summary(html: str) -> dict:
+def _legacy_summary(html: str) -> dict:
     home = _first_text(html, "duelParticipant__home") or _first_text(html, "participant__participantName")
     away_block = _texts_in(html, "duelParticipant__away")
     away = away_block[0] if away_block else ""
@@ -91,7 +91,7 @@ def parse_summary(html: str) -> dict:
     }
 
 
-def parse_stats(html: str) -> list[MatchStat]:
+def _legacy_stats(html: str) -> list[MatchStat]:
     stats: list[MatchStat] = []
     patterns = (
         re.compile(
@@ -151,7 +151,7 @@ def _incident_team(chunk: str) -> str | None:
     return None
 
 
-def parse_incidents(html: str) -> list[MatchIncident]:
+def _legacy_incidents(html: str) -> list[MatchIncident]:
     marks = list(re.finditer(r'class="[^"]*smv__incident\b[^"]*"', html))
     incidents: list[MatchIncident] = []
     for index, mark in enumerate(marks):
@@ -182,7 +182,7 @@ def parse_incidents(html: str) -> list[MatchIncident]:
     return incidents
 
 
-def parse_lineups(html: str) -> list[LineupPlayer]:
+def _legacy_lineups(html: str) -> list[LineupPlayer]:
     players: list[LineupPlayer] = []
     if "lf__lineUp" in html or "lf__player" in html:
         sides = list(re.finditer(r'class="[^"]*lf__side[^"]*"', html))
@@ -230,7 +230,7 @@ def _collect_named(html: str, tokens: tuple[str, ...]) -> list[str]:
     return list(dict.fromkeys(names))
 
 
-def parse_h2h(html: str) -> list[MatchResult]:
+def _legacy_h2h(html: str) -> list[MatchResult]:
     rows = list(re.finditer(r'class="[^"]*h2h__row[^"]*"', html))
     games: list[MatchResult] = []
     for index, mark in enumerate(rows):
@@ -269,3 +269,289 @@ def parse_h2h(html: str) -> list[MatchResult]:
     if games:
         return games
     return parse_matches(html)
+
+
+# ---------------------------------------------------------------------------
+# Current (2026) rendered match page. The legacy regex parsers above stay as
+# fallbacks for older markup and saved samples.
+# ---------------------------------------------------------------------------
+
+from .dom import Node, mid_from_href, parse_html, slice_from  # noqa: E402
+
+_PLACEHOLDER = re.compile(r"^(loading\.*|\.\.\.|-|\?)?$", re.I)
+_TERMINAL_STATUS = re.compile(
+    r"finished|after pen|after et|aet|cancel|postponed|awarded|abandoned|walkover|interrupted|delayed|to finish|fro",
+    re.I,
+)
+
+
+def _clean_name(text: str | None) -> str | None:
+    value = " ".join((text or "").split())
+    if not value or _PLACEHOLDER.fullmatch(value):
+        return None
+    return value
+
+
+def _participant_name(block: Node | None) -> str | None:
+    if block is None:
+        return None
+    for node in block.iter():
+        if node is not block and node.has_class("participant__participantName"):
+            name = _clean_name(node.text())
+            if name:
+                return name
+    return None
+
+
+def _breadcrumb_competition(root: Node) -> str | None:
+    crumbs = root.first_testid("wcl-breadcrumbs")
+    if crumbs is None:
+        return None
+    items = [item.text() for item in crumbs.by_testid("wcl-breadcrumbsItem")]
+    items = [item for item in items if item]
+    if len(items) >= 3:
+        return f"{items[1].upper()}: {items[2]}"
+    if len(items) == 2:
+        return items[1]
+    return None
+
+
+def parse_summary(html: str) -> dict:
+    marker = "detail__breadcrumbs" if "detail__breadcrumbs" in (html or "") else "duelParticipant"
+    if "duelParticipant" not in (html or ""):
+        return _legacy_summary(html)
+    root = parse_html(slice_from(html, marker))
+    duel = root.first_class("duelParticipant")
+    if duel is None or duel.first_class("duelParticipant__home") is None:
+        duel = root
+    home = _participant_name(duel.first_class("duelParticipant__home"))
+    away = _participant_name(duel.first_class("duelParticipant__away"))
+    wrapper = duel.first_class("detailScore__wrapper")
+    nums = [t for t in (wrapper.texts() if wrapper else []) if re.fullmatch(r"-?\d+", t)]
+    home_score = int(nums[0]) if len(nums) >= 1 else None
+    away_score = int(nums[1]) if len(nums) >= 2 else None
+    status_node = duel.first_class("fixedHeaderDuel__detailStatus") or duel.first_class("detailScore__status")
+    status = _clean_name(status_node.text()) if status_node else None
+    minute = None
+    timer = duel.first_class("eventTime") or duel.first_class("eventAndAddedTime")
+    if timer is not None and timer.text():
+        minute = timer.text().replace(" ", "")
+    elif status and not _TERMINAL_STATUS.search(status) and re.search(r"\d|half|break|pause", status, re.I):
+        minute = status
+    start_node = duel.first_class("duelParticipant__startTime")
+    date = time = None
+    if start_node is not None:
+        found = re.search(r"(\d{1,2}\.\d{1,2}\.?(?:\d{4})?)\s*(\d{1,2}:\d{2})?", start_node.text())
+        if found:
+            date, time = found.group(1), found.group(2)
+    competition = _breadcrumb_competition(root)
+    if not competition:
+        legacy = _legacy_summary(html)
+        competition = legacy.get("competition")
+    return {
+        "home_team": home,
+        "away_team": away,
+        "home_score": home_score,
+        "away_score": away_score,
+        "match_status": status,
+        "minute": minute,
+        "competition": competition,
+        "date": date,
+        "time": time,
+    }
+
+
+def summary_ready(html: str) -> bool:
+    parsed = parse_summary(html)
+    return bool(parsed.get("home_team") and parsed.get("away_team"))
+
+
+def parse_stats(html: str) -> list[MatchStat]:
+    if 'data-testid="wcl-statistics"' not in (html or ""):
+        return _legacy_stats(html)
+    root = parse_html(slice_from(html, 'data-testid="wcl-statistics"'))
+    stats: list[MatchStat] = []
+    seen: set[tuple[str, str, str]] = set()
+    for block in root.by_testid("wcl-statistics"):
+        row = block.first_class("wcl-labelRow") or block
+        cells = [child for child in row.children if isinstance(child, Node)]
+        label = row.first_class("wcl-label") or row.first_class("wcl-name")
+        name = label.text() if label else ""
+        if not name or len(cells) < 3:
+            continue
+        home = cells[0].text()
+        away_node = row.first_class("wcl-awayValue") or cells[-1]
+        away = away_node.text()
+        key = (name, home, away)
+        if key in seen:
+            continue
+        seen.add(key)
+        stats.append(MatchStat(name=name, home=home or None, away=away or None))
+    return stats or _legacy_stats(html)
+
+
+_KIND_BY_ICON = (
+    ("own-goal", "own-goal"),
+    ("penalty-missed", "penalty-missed"),
+    ("penalty-goal", "goal"),
+    ("goal", "goal"),
+    ("yellow-red", "red-card"),
+    ("red-card", "red-card"),
+    ("yellow-card", "yellow-card"),
+    ("substitution", "substitution"),
+    ("var", "var"),
+    ("penalty", "penalty"),
+)
+
+
+def _icon_kind(row: Node) -> str:
+    icons = [n.testid for n in row.iter() if n.testid.startswith("wcl-icon-incidents-")]
+    joined = " ".join(icons).lower()
+    for needle, kind in _KIND_BY_ICON:
+        if needle in joined:
+            return kind
+    legacy = " ".join(row.classes + [n.get("class") or "" for n in row.iter()])
+    return _incident_kind(legacy)
+
+
+def parse_incidents(html: str) -> list[MatchIncident]:
+    if "smv__participantRow" not in (html or ""):
+        return _legacy_incidents(html)
+    root = parse_html(slice_from(html, "smv__verticalSections") if "smv__verticalSections" in html else html)
+    incidents: list[MatchIncident] = []
+    for row in root.by_class("smv__participantRow"):
+        team = "home" if row.has_class("smv__homeParticipant") else "away" if row.has_class("smv__awayParticipant") else None
+        time_node = row.first_class("smv__timeBox")
+        players = [n for n in row.by_class("smv__playerName") if not n.has_class("smv__subDown")]
+        player = players[0].text() if players else None
+        score_node = row.first_class("smv__incidentHomeScore") or row.first_class("smv__incidentAwayScore")
+        kind = _icon_kind(row)
+        notes: list[str] = []
+        sub = row.first_class("smv__subIncident")
+        if sub is not None and sub.text():
+            notes.append(sub.text().strip("()"))
+        out = row.first_class("smv__subDown")
+        if out is not None and out.text():
+            notes.append(f"Out: {out.text()}")
+        assist = row.first_class("smv__assist")
+        if assist is not None and assist.text():
+            notes.append(f"Assist: {assist.text().strip('() ')}")
+        incidents.append(
+            MatchIncident(
+                time=time_node.text() if time_node else None,
+                team=team,
+                player=player or None,
+                kind=kind,
+                score=score_node.text() if score_node else None,
+                note="; ".join(notes) or None,
+            )
+        )
+    return incidents or _legacy_incidents(html)
+
+
+_LINEUP_ROLES = {
+    "starting lineups": "starter",
+    "substitutes": "bench",
+    "missing players": "missing",
+    "coaches": "coach",
+    "coach": "coach",
+}
+
+
+def parse_lineups(html: str) -> list[LineupPlayer]:
+    if 'data-testid="wcl-lineupsGroup"' not in (html or ""):
+        return _legacy_lineups(html)
+    root = parse_html(slice_from(html, 'data-testid="wcl-lineupsGroup"'))
+    players: list[LineupPlayer] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for group in root.by_testid("wcl-lineupsGroup"):
+        header = group.first_testid("wcl-headerSection-text")
+        title = (header.text() if header else "").strip().lower()
+        role = _LINEUP_ROLES.get(title)
+        if role is None:
+            continue  # e.g. "Substituted players" repeats the bench
+        for entry in group.find_all(lambda n: n.testid.startswith("wcl-lineupsParticipantGeneral-")):
+            side = "home" if entry.testid.endswith("-left") else "away" if entry.testid.endswith("-right") else None
+            name_node = entry.first_class("wcl-name")
+            name = name_node.text() if name_node else ""
+            if not name:
+                continue
+            number_node = entry.first_class("wcl-number")
+            number = number_node.text() if number_node else None
+            key = (name, side, role)
+            if key in seen:
+                continue
+            seen.add(key)
+            players.append(LineupPlayer(name=name, team=side, role=role, number=number or None))
+    return players or _legacy_lineups(html)
+
+
+def _h2h_row(row: Node) -> MatchResult | None:
+    home_node = row.first_class("h2h__homeParticipant")
+    away_node = row.first_class("h2h__awayParticipant")
+    home = _clean_name(home_node.text()) if home_node else None
+    away = _clean_name(away_node.text()) if away_node else None
+    if not home or not away:
+        return None
+    date_node = row.first_class("wclH2h__date") or row.first_class("h2h__date")
+    result = row.first_class("h2h__result")
+    nums = [t for t in (result.texts() if result else []) if re.fullmatch(r"-?\d+", t)]
+    home_score = int(nums[0]) if len(nums) >= 1 else None
+    away_score = int(nums[1]) if len(nums) >= 2 else None
+    href = row.get("href") or ""
+    if not href:
+        link = row.find(lambda n: n.tag == "a" and "/match/" in (n.get("href") or ""))
+        href = link.get("href") if link else ""
+    match_id = mid_from_href(href)
+    if not match_id:
+        ident = re.search(r"g_\d+_([A-Za-z0-9]+)", row.get("id") or "")
+        match_id = ident.group(1) if ident else None
+    event = row.first_class("h2h__event")
+    competition = (event.get("title") if event else None) or None
+    if href.startswith("/"):
+        href = "https://www.flashscore.com" + href
+    url = href or (f"https://www.flashscore.com/match/{match_id}/" if match_id else None)
+    return MatchResult(
+        date=date_node.text() if date_node else None,
+        home_team=home,
+        away_team=away,
+        status="finished" if home_score is not None else "scheduled",
+        home_score=home_score,
+        away_score=away_score,
+        match_id=match_id,
+        match_url=url,
+        competition=competition,
+    )
+
+
+def parse_h2h_sections(html: str) -> dict[str, list[MatchResult]]:
+    """Every H2H block by its header: 'Last matches: X', 'Head-to-head matches'."""
+    if "h2h__row" not in (html or ""):
+        return {}
+    marker = "h2h__section" if "h2h__section" in html else "h2h__row"
+    root = parse_html(slice_from(html, marker))
+    sections: dict[str, list[MatchResult]] = {}
+    blocks = root.by_class("h2h__section")
+    if not blocks:
+        rows = [r for r in (_h2h_row(row) for row in root.by_class("h2h__row")) if r]
+        return {"": rows} if rows else {}
+    for block in blocks:
+        header = block.first_testid("wcl-headerSection-text") or block.first_class("section__title")
+        title = header.text() if header else ""
+        rows = [r for r in (_h2h_row(row) for row in block.by_class("h2h__row")) if r]
+        sections.setdefault(title, []).extend(rows)
+    return sections
+
+
+def parse_h2h(html: str) -> list[MatchResult]:
+    sections = parse_h2h_sections(html)
+    if sections:
+        for title, rows in sections.items():
+            if "head-to-head" in title.lower() or "head to head" in title.lower():
+                return rows
+        if list(sections) == [""]:
+            return sections[""]
+        # Sections exist but none is the meeting list: the teams never met.
+        if any(title.lower().startswith("last matches") for title in sections):
+            return []
+    return _legacy_h2h(html)
