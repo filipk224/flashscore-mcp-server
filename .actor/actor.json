@@ -8,7 +8,7 @@
   "meta": {
     "templateId": "python-mcp-empty"
   },
-  "dockerfile": "./Dockerfile.apify",
+  "dockerfile": "../Dockerfile.apify",
   "readme": "./README.md",
   "input": "./INPUT_SCHEMA.json",
   "output": "./OUTPUT_SCHEMA.json",
