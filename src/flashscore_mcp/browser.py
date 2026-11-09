@@ -14,6 +14,48 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from .config import settings
 
 
+# Heavy third-party and binary assets the parsers never read. Blocking them
+# cuts page boot time sharply on small (Apify/VM) CPUs. Stylesheets stay so
+# visibility checks such as "Show more" keep working.
+_BLOCK_TYPES = {"image", "media", "font"}
+_BLOCK_HOSTS = (
+    "googletagmanager.com",
+    "google-analytics.com",
+    "googlesyndication.com",
+    "doubleclick.net",
+    "googleadservices.com",
+    "adservice.google",
+    "bannerflow.net",
+    "bannerflow.com",
+    "lsaudio.eu",
+    "content.livesportmedia.eu",
+    "scorecardresearch.com",
+    "facebook.net",
+    "hotjar.com",
+    "criteo",
+    "adnxs.com",
+    "amazon-adsystem.com",
+    "taboola.com",
+    "outbrain.com",
+)
+
+
+async def _route_filter(route) -> None:
+    request = route.request
+    try:
+        if request.resource_type in _BLOCK_TYPES:
+            await route.abort()
+            return
+        host = urlparse(request.url).hostname or ""
+        if any(blocked in host for blocked in _BLOCK_HOSTS):
+            await route.abort()
+            return
+        await route.continue_()
+    except Exception:
+        # The page may already be closing; never let routing break a scrape.
+        pass
+
+
 class BrowserManager:
     def __init__(self) -> None:
         self._playwright = None
@@ -57,6 +99,8 @@ class BrowserManager:
                 locale="en-US",
                 java_script_enabled=True,
             )
+            if settings.block_assets:
+                await context.route("**/*", _route_filter)
             page = await context.new_page()
             try:
                 yield page
@@ -73,7 +117,9 @@ browser_manager = BrowserManager()
 # (url fragment, selector, timeout ms or None to use nav_timeout_ms).
 # Odds cells are absent when the season is not current, so that wait is short.
 _TAB_READY = (
-    ("/standings", ".ui-table__row", None),
+    # Cups render a bracket instead of a table; without the draw selector a
+    # knockout competition waited the whole navigation timeout.
+    ("/standings", ".ui-table__row, .draw__bracket, [class*='draw__']", None),
     ("/form/", ".ui-table__row", None),
     ("/results", ".event__match, [id^='g_']", None),
     ("/fixtures", ".event__match, [id^='g_']", None),

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         "--disable-gpu",
     ]
     nav_timeout_ms: int = 25000
+    # Abort images, fonts, media and ad/analytics hosts in scrape pages.
+    block_assets: bool = True
     max_concurrent_pages: int = 4
     base_url: str = "https://www.flashscore.com"
     port: int = 8000
