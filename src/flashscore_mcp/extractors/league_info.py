@@ -20,4 +20,9 @@ async def get_league(league: str) -> LeagueInfo:
     info = parse_league_page(html)
     if not info.name and not info.tabs:
         empty_or_raise(html, "league", [])
+    if not league.startswith("http"):
+        # The resolved path is the menu slug list_sports / list_leagues use.
+        sport = league.strip("/").split("/")[0]
+        if sport and info.sport != sport:
+            info = info.model_copy(update={"sport": sport})
     return info

@@ -122,6 +122,39 @@ def _extra(text: str):
     return {"raw": raw, "for": int(pair.group(1)), "against": int(pair.group(2))}
 
 
+_BADGE = re.compile(
+    r'<a\b[^>]*class="([^"]*\btableCellFormIcon\b[^"]*)"[^>]*>(.*?)</a>',
+    re.S,
+)
+_BADGE_TESTID = {"win": "W", "lose": "L", "loss": "L", "draw": "D"}
+
+
+def _form_badges(frag: str) -> str:
+    """Played results only: the leading "?" badge is the next fixture.
+
+    The form cell is the row's last cell, so the raw text run also swept up
+    the table legend and the next row; read only the badge anchors.
+    """
+    badges = list(_BADGE.finditer(frag))
+    if not badges:
+        # Older markup: plain letters inside the cell, stop at the next row.
+        stop = re.search(r'ui-table__row|tableLegend', frag)
+        return " ".join(re.findall(r">([^<]*)<", frag[: stop.start() if stop else 600]))
+    letters: list[str] = []
+    for badge in badges:
+        cls, inner = badge.group(1), badge.group(2)
+        if "--TBD" in cls or "--tbd" in cls.lower():
+            continue
+        tid = re.search(r'data-testid="wcl-badgeForm-([a-z]+)"', inner)
+        if tid and tid.group(1) in _BADGE_TESTID:
+            letters.append(_BADGE_TESTID[tid.group(1)])
+            continue
+        text = "".join(t.strip() for t in re.findall(r">([^<]*)<", inner)).upper()
+        if text and text != "?":
+            letters.append(text)
+    return " ".join(letters)
+
+
 def _form_text(text: str) -> str | None:
     letters = _FORM_LETTER.findall(text)
     return "".join(letters) or None
@@ -151,6 +184,9 @@ def _cells(chunk: str, pattern: re.Pattern) -> list[dict]:
         if _role(cls) == "wrapper" and i + 1 < len(marks) and marks[i + 1].start() < end:
             continue
         frag = chunk[mark.end() : end]
+        if _role(cls) == "form":
+            cells.append({"role": "form", "text": _form_badges(frag), "class": cls})
+            continue
         name = re.search(r'class="[^"]*\btableCellParticipant__name\b[^"]*"[^>]*>([^<]+)', frag)
         texts = re.findall(r">([^<]*)<", frag)
         text = " ".join(t.strip() for t in texts if t.strip())

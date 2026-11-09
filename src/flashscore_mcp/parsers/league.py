@@ -11,6 +11,22 @@ _PRIMARY = ("Summary", "Odds", "News", "Results", "Fixtures", "Standings", "Arch
 _HREF = re.compile(r'<a class="leftMenu__href" href="([^"]+)">([^<]+)</a>')
 
 
+# Internal sport names in the page script differ from the URL/menu slugs that
+# list_sports returns (soccer vs football).
+_INTERNAL_SPORT = {"soccer": "football", "ice-hockey": "hockey", "aussie-rules": "aussie-rules"}
+
+
+def _sport_slug(canonical: str | None, internal: str | None) -> str | None:
+    if canonical:
+        parts = [part for part in urlparse(canonical).path.strip("/").split("/") if part]
+        if len(parts) >= 3:
+            return parts[0]
+    if internal:
+        key = internal.strip().lower().replace("_", "-")
+        return _INTERNAL_SPORT.get(key, key)
+    return None
+
+
 def parse_league_page(html: str) -> LeagueInfo:
     sport_m = re.search(r'"sport":"([^"]+)"', html)
     country_m = re.search(r'class="leftMenu__title[^"]*"[^>]*>([^<]+)', html)
@@ -24,7 +40,7 @@ def parse_league_page(html: str) -> LeagueInfo:
     name = " ".join(h1_m.group(1).split()) if h1_m else ""
     return LeagueInfo(
         name=name,
-        sport=sport_m.group(1) if sport_m else None,
+        sport=_sport_slug(canon_m.group(1) if canon_m else None, sport_m.group(1) if sport_m else None),
         country=" ".join(country_m.group(1).split()) if country_m else None,
         season=season_m.group(1).strip() if season_m else None,
         url=canon_m.group(1) if canon_m else None,
@@ -50,3 +66,39 @@ def parse_menu_leagues(html: str) -> list[League]:
         return found
     from .adapter import parse_menu_leagues_from_hrefs
     return parse_menu_leagues_from_hrefs(html, League)
+
+
+_SEO_BLOCK = re.compile(r'class="left_menu_categories_seo"[^>]*>(.*?)</div>', re.S)
+_SEO_LINK = re.compile(r'<a href="([^"]+)"[^>]*>([^<]+)</a>')
+_LMC_ITEM = re.compile(
+    r'<a[^>]*class="[^"]*lmc__item[^"]*"[^>]*href="([^"]+)"[^>]*>\s*(?:<[^>]+>\s*)*([^<]+)<'
+)
+
+
+def parse_menu_countries(html: str, sport: str) -> list[tuple[str, str, str]]:
+    """(name, slug, path) for every country in a sport's left menu.
+
+    The visible menu renders the first ~22 countries and hides the rest behind
+    "Show more"; the page also ships the full list as plain SEO links, which is
+    what this reads. Paths are /<sport>/<country>/ only (league links skipped).
+    """
+    import html as html_lib
+
+    out: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    sport = sport.strip("/").lower()
+    sources = [m.group(1) for m in _SEO_BLOCK.finditer(html)]
+    pairs = [pair for block in sources for pair in _SEO_LINK.findall(block)]
+    if not pairs:
+        pairs = _LMC_ITEM.findall(html)
+    for href, name in pairs:
+        path = urlparse(href).path if href.startswith("http") else href
+        parts = [part for part in path.strip("/").split("/") if part]
+        if len(parts) != 2 or parts[0] != sport:
+            continue
+        slug = parts[1]
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append((html_lib.unescape(" ".join(name.split())), slug, "/" + "/".join(parts) + "/"))
+    return out
