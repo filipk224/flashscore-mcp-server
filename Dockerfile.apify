@@ -11,13 +11,16 @@ FROM apify/actor-python-playwright:3.12-1.64.1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app/src \
+    PYTHONPATH=/usr/src/app/src \
     PORT=8000 \
     HOST=0.0.0.0 \
     FLASHSCORE_HEADLESS=true \
     FLASHSCORE_MAX_CONCURRENT_PAGES=2
 
-WORKDIR /app
+# Keep the base image WORKDIR (/usr/src/app). Its ENTRYPOINT is
+# ./xvfb-entrypoint.sh, resolved against WORKDIR. WORKDIR /app made
+# that script missing and the Actor failed with "ENTRYPOINT/CMD could
+# not be started" under LIMITED_PERMISSIONS.
 
 COPY --chown=myuser:myuser requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt \
