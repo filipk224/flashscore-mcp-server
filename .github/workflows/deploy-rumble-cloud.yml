@@ -266,21 +266,23 @@ jobs:
             echo "NOTE: Grok and many remote MCP clients require HTTPS. Use MCP_ENDPOINT (trycloudflare.com) with Authorization: Bearer <FLASHSCORE_MCP_TOKEN>."
 
             echo "--- public :8000 should be closed ---"
-            # appleboy script_stop enables set -e. A refused public
-            # connect is the success case (exit 1), so do not use it as
-            # an if-test or a python -c one-liner with an interpolated IP.
+            # appleboy script_stop checks the exit code after every line
+            # (including the line after then/else) and exits on any non-zero
+            # one, so set +e does not help. A refused public connect is the
+            # success case, so the probe line must itself exit 0.
             public_port_rc=1
             if [ -n "$PUBLIC_IP" ]; then
-              set +e
-              timeout 5 bash -c "echo >/dev/tcp/${PUBLIC_IP}/8000" </dev/null >/dev/null 2>&1
-              public_port_rc=$?
-              set -e
+              public_port_rc=0
+              timeout 5 bash -c "echo >/dev/tcp/${PUBLIC_IP}/8000" </dev/null >/dev/null 2>&1 || public_port_rc=$?
             fi
+            # No else here: the per-line exit check would see the failed
+            # if-test's code right after else and stop the deploy.
             if [ "$public_port_rc" -eq 0 ]; then
               echo "WARNING: port 8000 is reachable on PUBLIC_IP (should be localhost-only)"
               sudo iptables -C INPUT -p tcp --dport 8000 ! -i lo -j DROP 2>/dev/null || \
                 sudo iptables -I INPUT -p tcp --dport 8000 ! -i lo -j DROP || true
-            else
+            fi
+            if [ "$public_port_rc" -ne 0 ]; then
               echo "PUBLIC_PORT_8000=closed"
             fi
 
