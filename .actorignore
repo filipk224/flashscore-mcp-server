@@ -3,3 +3,6 @@ tests/
 .github/
 .actorignore
 .dockerignore
+Dockerfile
+docker-compose.yml
+.env.example
