@@ -1,6 +1,8 @@
 """One match-row parser for results, fixtures, summary, and live status."""
 from __future__ import annotations
 
+import bisect
+import html as html_lib
 import re
 
 from ..config import settings
@@ -28,16 +30,43 @@ def parse_matches(html: str) -> list[MatchResult]:
     return []
 
 
+_HEADER_LEAGUE = re.compile(r'data-testid="wcl-headerLeague"|class="[^"]*\bheaderLeague__wrapper\b')
+
+
+def _league_headers(html: str) -> list[tuple[int, str]]:
+    """(position, 'COUNTRY: League') for every current-style league header."""
+    found: list[tuple[int, str]] = []
+    for mark in _HEADER_LEAGUE.finditer(html):
+        chunk = html[mark.start() : mark.start() + 6000]
+        title = re.search(r'class="[^"]*headerLeague__title-text[^"]*"[^>]*>([^<]+)<', chunk)
+        country = re.search(r'class="[^"]*headerLeague__category-text[^"]*"[^>]*>([^<]+)<', chunk)
+        if not title:
+            continue
+        name = html_lib.unescape(" ".join(title.group(1).split()))
+        if country and country.group(1).strip():
+            name = f"{html_lib.unescape(country.group(1).strip())}: {name}"
+        if found and found[-1][0] > mark.start() - 50:
+            continue
+        found.append((mark.start(), name))
+    return found
+
+
 def _parse_matches_html(html: str) -> list[MatchResult]:
     marks = list(_ROW.finditer(html))
     if not marks:
         marks = list(re.finditer(r'id="g_\d+_[^"]+"', html))
+    headers = _league_headers(html)
+    header_pos = [pos for pos, _ in headers]
     games: list[MatchResult] = []
     for index, mark in enumerate(marks):
         end = marks[index + 1].start() if index + 1 < len(marks) else min(len(html), mark.start() + 12000)
         preceding = html[max(0, mark.start() - 2500) : mark.start()]
         game = _one(html[mark.start() : end], preceding)
         if game:
+            if headers:
+                at = bisect.bisect_right(header_pos, mark.start()) - 1
+                if at >= 0 and (game.competition is None or header_pos[at] > mark.start() - 2500):
+                    game.competition = headers[at][1]
             games.append(game)
     return games
 
@@ -72,6 +101,10 @@ def _one(chunk: str, preceding: str = "") -> MatchResult | None:
     note = _note(chunk)
     if note:
         extras["note"] = note
+    if _FRO.match(stage or ""):
+        extras["note"] = "Final result only (no live coverage)"
+    elif stage and not _DATE.search(stage) and not _CLOCK.fullmatch(stage):
+        extras["stage"] = stage
     rnd = _round_from(preceding) or _round_from(chunk)
     status = _status(chunk, stage, home_score, away_score)
     match_id = _match_id(chunk, preceding)
@@ -103,11 +136,13 @@ def _match_id(chunk: str, preceding: str = "") -> str | None:
 
 
 def _match_url(chunk: str, match_id: str | None) -> str | None:
-    href = re.search(r'href="((?:https?://[^"]+)?/match/[^"#?]+)"', chunk)
+    href = re.search(r'href="((?:https?://[^"]+)?/match/[^"#]+)"', chunk)
     if href:
-        path = href.group(1)
+        path = html_lib.unescape(href.group(1))
+        if "?" not in path:
+            path = path.rstrip("/") + "/"
         if path.startswith("http"):
-            return path.rstrip("/") + "/"
+            return path
         return settings.base_url.rstrip("/") + path
     if match_id:
         return f"{settings.base_url.rstrip('/')}/match/{match_id}/"
@@ -115,9 +150,14 @@ def _match_url(chunk: str, match_id: str | None) -> str | None:
 
 
 def _minute(status: str, stage: str) -> str | None:
-    if status != "live" or not stage or _DATE.search(stage):
+    if status != "live" or not stage or _DATE.search(stage) or _CLOCK.fullmatch(stage.strip()):
         return None
-    text = stage.strip()
+    if _FRO.match(stage.strip()):
+        return None
+    text = " ".join(stage.replace("\xa0", " ").split())
+    # Football rows render the minute as "67" plus a blinking apostrophe span.
+    if re.fullmatch(r"\d{1,3}(?:\+\d{1,2})?", text):
+        text += "'"
     return text or None
 
 
@@ -162,24 +202,52 @@ def _score(text: str) -> int | None:
 
 
 def _stage_text(chunk: str) -> str:
-    for token in ("event__stageTime", "event__stage"):
+    for token in ("event__stageTime", "event__stage--block", "event__stage", "event__time"):
         text = _first_text(chunk, token)
         if text:
-            return text
+            return text.replace("\xa0", " ").strip()
     return ""
 
 
 def _when(stage: str) -> tuple[str | None, str | None]:
     match = _DATE.search(stage)
     if not match:
-        return None, None
+        clock = _CLOCK.fullmatch(stage.strip()) if stage else None
+        return (None, clock.group(1)) if clock else (None, None)
     return match.group(1), match.group(2)
 
 
+_CLOCK = re.compile(r"(\d{1,2}:\d{2})")
+_FINISHED_STAGES = re.compile(
+    r"^(finished|ft|aet|after pen\.?|after penalties|after et|after extra time|awarded|walkover|retired|wo)$", re.I
+)
+_OTHER_STAGES = (
+    (re.compile(r"^postponed$", re.I), "postponed"),
+    (re.compile(r"^cancell?ed$|^canceled$", re.I), "cancelled"),
+    (re.compile(r"^abandoned$", re.I), "abandoned"),
+    (re.compile(r"^(delayed|tbd)$", re.I), "scheduled"),
+)
+# "FRO" is Flashscore's "Final result only": the game has no live coverage,
+# so there is no minute and the score only appears once it is final.
+_FRO = re.compile(r"^(fro|final result only)$", re.I)
+
+
 def _status(chunk: str, stage: str, home: int | None, away: int | None) -> str:
-    if re.search(r'data-live="true"', chunk[:2000]):
+    opening = chunk[:600]
+    text = (stage or "").strip()
+    if _FINISHED_STAGES.match(text):
+        return "finished"
+    for pattern, value in _OTHER_STAGES:
+        if pattern.match(text):
+            return value
+    if re.search(r'event__match--live\b', opening) or re.search(r'data-live="true"', chunk[:4000]):
         return "live"
-    if stage and not _DATE.search(stage) and stage.strip().lower() != "finished":
+    if re.search(r'event__match--scheduled\b', opening):
+        return "scheduled"
+    if text and (_DATE.search(text) or _CLOCK.fullmatch(text)):
+        return "scheduled" if home is None and away is None else "finished"
+    if text and not re.search(r"\d{1,2}\.\d{1,2}\.", text):
+        # Legacy rows: a bare stage such as 67' or "Half Time" means live.
         return "live"
     if home is None and away is None:
         return "scheduled"

@@ -25,6 +25,13 @@ _EMPTY_HINTS = (
     "no articles",
 )
 
+# Messages the site renders in place of a tab's content. They are checked
+# before the fail hints because ad scripts on these pages can mention
+# "captcha" and the like even when the page loaded fine.
+_SITE_EMPTY_MESSAGES = (
+    "no betting odds were found",
+)
+
 _FAIL_HINTS = (
     "cf-challenge",
     "cf-browser-verification",
@@ -46,6 +53,8 @@ def classify_page(html: str, *, tab: str, parsed_count: int, raw_hints: int = 0)
         return "failed"
     if "flashscore" not in low:
         return "failed"
+    if raw_hints == 0 and any(msg in low for msg in _SITE_EMPTY_MESSAGES):
+        return "empty"
     if any(hint in low for hint in _FAIL_HINTS):
         return "failed"
     if raw_hints > 0:
@@ -86,7 +95,10 @@ def page_outcome(html: str, *, tab: str, parsed_count: int, raw_hints: int = 0) 
     if status == "ok":
         return "ok", None
     if status == "empty":
-        if tab in {"results", "fixtures", "live", "day", "team", "h2h", "match"}:
+        if tab == "h2h":
+            # Head-to-head is history, not a schedule: the teams have not met.
+            return "empty", "no-meetings"
+        if tab in {"results", "fixtures", "live", "day", "team", "match"}:
             return "empty", "no-matches-scheduled"
         return "empty", "no-data"
     text = html or ""

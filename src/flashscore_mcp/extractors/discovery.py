@@ -62,8 +62,31 @@ async def list_sports() -> List[Sport]:
     return sports
 
 async def list_countries(sport: str) -> List[Country]:
-    sport_slug = sport.lower().replace(" ", "-")
+    sport_slug = sport.strip().strip("/").lower().replace(" ", "-")
+    if sport_slug == "soccer":
+        sport_slug = "football"
     url = f"{settings.base_url}/{sport_slug}/"
+    from .fetch import fetch_html
+    from ..parsers.league import parse_menu_countries
+
+    try:
+        html = await fetch_html(url)
+        found = parse_menu_countries(html, sport_slug)
+    except Exception as exc:
+        logger.warning("list_countries SEO list failed for {}: {}", url, exc)
+        found = []
+    if found:
+        countries = [
+            Country(name=name, slug=slug, url=urljoin(settings.base_url, path))
+            for name, slug, path in found
+        ]
+        logger.info("list_countries {} -> {} (full menu list)", sport_slug, len(countries))
+        return countries
+    return await _list_countries_from_menu(sport_slug, url)
+
+
+async def _list_countries_from_menu(sport_slug: str, url: str) -> List[Country]:
+    """Fallback: read the rendered left menu after expanding it."""
     countries: List[Country] = []
     async with browser_manager.new_page() as page:
         await safe_goto(page, url)
