@@ -1,5 +1,8 @@
 # Flashscore sample extractors
 
+> **Status (2026-11-09):** Implemented. The parser and extractor design in this document still describes standings, results, fixtures, news, odds, and archive behavior. Match-detail pages and a live listing tool, listed here as later work, later shipped. See `docs/superpowers/specs/2026-11-09-flashscore-mcp-server-design.md`.
+
+
 The statistics are the product. Sport only changes which columns a page has. Parsers are pure functions of HTML. The saved pages in `MCP/Flashscore MCP/flashscore page samples` are the tests. Playwright only fetches a page and hands the HTML to those parsers.
 
 First sports: American football, Aussie rules, baseball, basketball, hockey, rugby league, rugby union, volleyball. Archived seasons use the same layout as the current season. Odds, News, Fixtures, and Archive share one layout across these sports. Archived seasons have no Odds tab.
