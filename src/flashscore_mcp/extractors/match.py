@@ -12,6 +12,7 @@ from ..parsers.match_detail import parse_h2h, parse_incidents, parse_lineups, pa
 from .fetch import fetch_html
 from .match_page import load_match_page
 from .match_ref import resolve_match_ref
+from ..errors import SECTION_TIMEOUT, BusyError
 from .page_status import LoadFailed, page_outcome
 from .team import TeamRef, resolve_team
 from ..parsers.matches import parse_matches
@@ -93,6 +94,9 @@ async def get_match(
             incidents = parse_incidents(summary_html)
             if incidents:
                 detail.incidents = incidents
+                detail.errors.pop("incidents", None)
+            elif "incidents" in detail.errors:
+                pass  # the timeline did not render in time: keep the timeout error
             elif detail.home_team and detail.away_team:
                 # Hydrated page with no timeline: a scheduled game or one
                 # without incidents is empty, not failed.
@@ -133,6 +137,12 @@ async def get_match(
         detail.status = "partial"
         detail.reason = "section-failed"
     elif not got_identity and not requested_payload:
+        if detail.errors and all(str(v).startswith("timeout") for v in detail.errors.values()):
+            raise LoadFailed(
+                f"Timed out loading match {match_id}: nothing was read within the time budget. "
+                "Retry; the page may be slow to start.",
+                reason=SECTION_TIMEOUT,
+            )
         html = summary_html or next(iter(fetched.values()), "")
         status, reason = page_outcome(html, tab="match", parsed_count=0)
         if status == "failed" or not html:
@@ -226,6 +236,8 @@ async def _find_meeting(ref_a: TeamRef, ref_b: TeamRef) -> Optional[str]:
         url = f"{ref_a.url}{tab}/"
         try:
             html = await fetch_html(url, full=until is not None, until_count=until)
+        except BusyError:
+            raise
         except LoadFailed as exc:
             logger.warning("h2h meeting search {} failed: {}", url, exc)
             continue
