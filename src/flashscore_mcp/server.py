@@ -161,9 +161,10 @@ async def get_h2h(
     team_b: Optional[str] = None,
     last_n: Optional[int] = None,
     days_back: Optional[int] = None,
+    season: Optional[str] = None,
 ) -> MatchCollection:
-    """Head-to-head history. Pass a match_id or match_url, or both team_a and team_b. last_n keeps the newest N meetings; days_back keeps meetings in that many days. You can also request h2h as a get_match section."""
-    return await match_ext.get_h2h(match, team_a, team_b, last_n, days_back)
+    """Head-to-head history. Pass a match_id or match_url (full history from that match's H2H tab), or both team_a and team_b. With team names the search is limited to one season, because two teams meet only a few times in a season: season defaults to the current one, or pass '2025/26' or '2025-2026' (1 July to 30 June); season='all' reads the full history instead (slower). The search has a time budget and a page-load cap, so a result with status 'partial' and reason 'timeout' or 'load-cap' may be missing meetings, while status 'empty' with reason 'no-meetings' means the teams did not meet in that season. last_n keeps the newest N meetings; days_back keeps meetings in that many days. You can also request h2h as a get_match section."""
+    return await match_ext.get_h2h(match, team_a, team_b, last_n, days_back, season)
 
 
 @mcp.tool()

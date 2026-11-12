@@ -1,6 +1,8 @@
 """Single-match detail and head-to-head."""
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
@@ -10,8 +12,10 @@ from ..models import MatchCollection, MatchDetail, MatchResult
 from ..parsers.adapter import count_match_hints
 from ..parsers.match_detail import parse_h2h, parse_incidents, parse_lineups, parse_stats, parse_summary
 from .fetch import fetch_html
+from .h2h_season import SeasonScan, SeasonWindow, parse_season, scan_season
 from .match_page import load_match_page
 from .match_ref import resolve_match_ref
+from ..config import settings
 from ..errors import SECTION_TIMEOUT, BusyError
 from .page_status import LoadFailed, page_outcome
 from .team import TeamRef, resolve_team
@@ -263,12 +267,69 @@ def _h2h_collection(detail: MatchDetail, label: str, last_n, days_back) -> Match
     return MatchCollection(status="ok", items=items)
 
 
+def _season_collection(
+    scan: SeasonScan, window: SeasonWindow, ref_a: TeamRef, ref_b: TeamRef, last_n, days_back, budget_s: float
+) -> MatchCollection:
+    games = sorted(
+        scan.items.values(),
+        key=lambda g: _parse_game_date(g.date) or date.min,
+        reverse=True,
+    )
+    items = filter_history(games, last_n, days_back)
+    errors: list[str] = []
+    reason: Optional[str] = None
+    if scan.timed_out:
+        reason = "timeout"
+        errors.append(
+            f"timeout: the {window.label} search stopped after {budget_s:.0f}s; "
+            "the meetings listed may be incomplete. Retry, or pass a match URL."
+        )
+    elif scan.capped:
+        reason = "load-cap"
+        errors.append(
+            f"load-cap: stopped after {scan.loads} page loads before reaching the start of {window.label}; "
+            "the meetings listed may be incomplete."
+        )
+    if errors:
+        return MatchCollection(status="partial", reason=reason, items=items, errors=errors)
+    if not items:
+        return MatchCollection(
+            status="empty",
+            reason=H2H_EMPTY_REASON,
+            items=[],
+            errors=[f"No meetings between {ref_a.path} and {ref_b.path} in season {window.label}."],
+        )
+    return MatchCollection(status="ok", items=items)
+
+
+async def _season_h2h(team_a: str, team_b: str, window: SeasonWindow, last_n, days_back) -> MatchCollection:
+    budget = settings.h2h_budget_s
+    deadline = time.monotonic() + budget
+    scan = SeasonScan()
+    try:
+        ref_a = await asyncio.wait_for(resolve_team(team_a), timeout=max(0.1, deadline - time.monotonic()))
+        ref_b = await asyncio.wait_for(resolve_team(team_b), timeout=max(0.1, deadline - time.monotonic()))
+    except asyncio.TimeoutError:
+        raise LoadFailed(
+            f"Timed out after {budget:.0f}s looking up the teams. Retry, or pass team URLs.",
+            reason=SECTION_TIMEOUT,
+        ) from None
+    if ref_a.id == ref_b.id:
+        raise ValueError("team_a and team_b are the same team.")
+    try:
+        await scan_season(ref_a, ref_b, window, scan, deadline)
+    except asyncio.TimeoutError:
+        scan.timed_out = True
+    return _season_collection(scan, window, ref_a, ref_b, last_n, days_back, budget)
+
+
 async def get_h2h(
     match: Optional[str] = None,
     team_a: Optional[str] = None,
     team_b: Optional[str] = None,
     last_n: Optional[int] = None,
     days_back: Optional[int] = None,
+    season: Optional[str] = None,
 ) -> MatchCollection:
     clicks = _more_clicks(last_n, days_back)
     if match:
@@ -276,21 +337,41 @@ async def get_h2h(
         return _h2h_collection(detail, match, last_n, days_back)
 
     if team_a and team_b:
-        ref_a = await resolve_team(team_a)
-        ref_b = await resolve_team(team_b)
-        if ref_a.id == ref_b.id:
-            raise ValueError("team_a and team_b are the same team.")
-        meeting = await _find_meeting(ref_a, ref_b)
-        if not meeting:
-            meeting = await _find_meeting(ref_b, ref_a)
-        if not meeting:
-            return MatchCollection(
-                status="empty",
-                reason=H2H_EMPTY_REASON,
-                items=[],
-                errors=[f"No recent or scheduled game between {ref_a.path} and {ref_b.path} to read H2H from."],
+        window = parse_season(season)
+        if window is not None:
+            return await _season_h2h(team_a, team_b, window, last_n, days_back)
+        # season="all": the full history from a meeting page, under one budget.
+        try:
+            return await asyncio.wait_for(
+                _full_history_h2h(team_a, team_b, clicks, last_n, days_back),
+                timeout=settings.h2h_budget_s,
             )
-        detail = await get_match(meeting, sections=["h2h"], h2h_more=clicks)
-        return _h2h_collection(detail, f"{team_a} v {team_b}", last_n, days_back)
+        except asyncio.TimeoutError:
+            raise LoadFailed(
+                f"Timed out after {settings.h2h_budget_s:.0f}s reading head-to-head for {team_a} v {team_b}. "
+                "Retry, use a single season, or pass a match URL.",
+                reason=SECTION_TIMEOUT,
+            ) from None
 
-    raise ValueError("Pass a match URL/id, or both team_a and team_b, then optionally last_n or days_back.")
+    raise ValueError(
+        "Pass a match URL/id, or both team_a and team_b, then optionally season, last_n or days_back."
+    )
+
+
+async def _full_history_h2h(team_a: str, team_b: str, clicks: int, last_n, days_back) -> MatchCollection:
+    ref_a = await resolve_team(team_a)
+    ref_b = await resolve_team(team_b)
+    if ref_a.id == ref_b.id:
+        raise ValueError("team_a and team_b are the same team.")
+    meeting = await _find_meeting(ref_a, ref_b)
+    if not meeting:
+        meeting = await _find_meeting(ref_b, ref_a)
+    if not meeting:
+        return MatchCollection(
+            status="empty",
+            reason=H2H_EMPTY_REASON,
+            items=[],
+            errors=[f"No recent or scheduled game between {ref_a.path} and {ref_b.path} to read H2H from."],
+        )
+    detail = await get_match(meeting, sections=["h2h"], h2h_more=clicks)
+    return _h2h_collection(detail, f"{team_a} v {team_b}", last_n, days_back)
