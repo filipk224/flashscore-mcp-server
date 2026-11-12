@@ -65,7 +65,7 @@ class ApifyHttpCompat(unittest.TestCase):
             result = initialized.json()["result"]
             self.assertEqual(result["protocolVersion"], "2025-03-26")
             self.assertEqual(result["serverInfo"]["name"], "flashscore-mcp")
-            self.assertEqual(result["serverInfo"]["version"], "0.2.4")
+            self.assertEqual(result["serverInfo"]["version"], "0.2.5")
 
             listed = client.post(
                 "/mcp",
