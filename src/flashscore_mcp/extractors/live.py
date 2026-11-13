@@ -13,6 +13,7 @@ from ..parsers.adapter import count_match_hints
 from ..parsers.matches import parse_matches
 from ..parsers.feed import merge_rows, parse_day_feed
 from .fetch import DayPage, fetch_day, fetch_html
+from ..errors import BusyError
 from .page_status import LoadFailed, page_outcome
 from .resolve import parse_name_and_country, resolve_league_ref
 from .results import _league_url
@@ -248,6 +249,8 @@ async def get_matches_by_day(
                 html = await fetch_html(url, full=True)
                 html_parts.append(html)
                 items.extend(parse_matches(html))
+            except BusyError:
+                raise
             except LoadFailed as exc:
                 errors.append(f"{url}: {exc.reason}")
         dated = [game for game in items if _same_day(game, target)]

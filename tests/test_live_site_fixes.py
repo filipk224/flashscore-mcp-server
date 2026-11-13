@@ -292,7 +292,7 @@ class GetMatchAndH2HTools(unittest.TestCase):
             with patch("flashscore_mcp.extractors.match.resolve_team", side_effect=fake_resolve), \
                  patch("flashscore_mcp.extractors.match.fetch_html", side_effect=fake_fetch), \
                  patch("flashscore_mcp.extractors.match.load_match_page", side_effect=fake_load):
-                result = await match_ext.get_h2h(team_a="Arsenal", team_b="Chelsea")
+                result = await match_ext.get_h2h(team_a="Arsenal", team_b="Chelsea", season="all")
             self.assertEqual(result.status, "ok")
             self.assertEqual([(g.home_team, g.home_score, g.away_score) for g in result.items], [("Arsenal", 2, 1)])
             self.assertIn("/match/KkKkKkKk/", loaded[0])

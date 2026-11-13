@@ -12,6 +12,7 @@ from playwright.async_api import async_playwright, Browser, Page, Locator
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .config import settings
+from .errors import BusyError
 
 
 # Heavy third-party and binary assets the parsers never read. Blocking them
@@ -89,23 +90,45 @@ class BrowserManager:
             self._playwright = None
         logger.info("Browser stopped")
 
+    async def _acquire_slot(self, queue_wait_s: Optional[float]) -> None:
+        """Take a page slot, or raise BusyError after the queue-wait cap."""
+        wait = settings.queue_wait_s if queue_wait_s is None else queue_wait_s
+        if wait <= 0:
+            await self._semaphore.acquire()
+            return
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=wait)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "No browser slot free after {:.0f}s (limit {}); returning busy",
+                wait,
+                settings.max_concurrent_pages,
+            )
+            raise BusyError(
+                f"busy, retry: all {settings.max_concurrent_pages} browser slots were in use "
+                f"for {wait:.0f}s. Try again in a few seconds."
+            ) from None
+
     @asynccontextmanager
-    async def new_page(self) -> AsyncIterator[Page]:
+    async def new_page(self, queue_wait_s: Optional[float] = None) -> AsyncIterator[Page]:
         await self.start()
-        async with self._semaphore:
+        await self._acquire_slot(queue_wait_s)
+        try:
             context = await self._browser.new_context(
                 user_agent=settings.user_agent,
                 viewport={"width": 1280, "height": 800},
                 locale="en-US",
                 java_script_enabled=True,
             )
-            if settings.block_assets:
-                await context.route("**/*", _route_filter)
-            page = await context.new_page()
             try:
+                if settings.block_assets:
+                    await context.route("**/*", _route_filter)
+                page = await context.new_page()
                 yield page
             finally:
                 await context.close()
+        finally:
+            self._semaphore.release()
 
 
 browser_manager = BrowserManager()

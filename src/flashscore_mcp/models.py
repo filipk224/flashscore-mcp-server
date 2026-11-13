@@ -80,6 +80,9 @@ class LeagueInfo(BaseModel):
     sport: Optional[str] = None
     country: Optional[str] = None
     season: Optional[str] = None
+    # The league's season format, read from the label under its name:
+    # "calendar" ('2026') or "split" ('2026-2027'). Archive seasons use the same labels.
+    season_format: Optional[str] = None
     url: Optional[str] = None
     tabs: list[str] = Field(default_factory=list)
     archive_seasons: list["Season"] = Field(default_factory=list)
@@ -137,6 +140,7 @@ class MatchCollection(BaseModel):
     reason: Optional[str] = None
     items: list[MatchResult] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class MatchDetail(BaseModel):
