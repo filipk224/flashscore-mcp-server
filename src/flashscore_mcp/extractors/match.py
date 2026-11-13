@@ -12,7 +12,8 @@ from ..models import MatchCollection, MatchDetail, MatchResult
 from ..parsers.adapter import count_match_hints
 from ..parsers.match_detail import parse_h2h, parse_incidents, parse_lineups, parse_stats, parse_summary
 from .fetch import fetch_html
-from .h2h_season import SeasonScan, SeasonWindow, parse_season, scan_season
+from ..seasons import SeasonPlan, parse_label
+from .h2h_season import SeasonScan, scan_season
 from .match_page import load_match_page
 from .match_ref import resolve_match_ref
 from ..config import settings
@@ -268,7 +269,7 @@ def _h2h_collection(detail: MatchDetail, label: str, last_n, days_back) -> Match
 
 
 def _season_collection(
-    scan: SeasonScan, window: SeasonWindow, ref_a: TeamRef, ref_b: TeamRef, last_n, days_back, budget_s: float
+    scan: SeasonScan, window: SeasonPlan, ref_a: TeamRef, ref_b: TeamRef, last_n, days_back, budget_s: float
 ) -> MatchCollection:
     games = sorted(
         scan.items.values(),
@@ -277,6 +278,7 @@ def _season_collection(
     )
     items = filter_history(games, last_n, days_back)
     errors: list[str] = []
+    notes = list(window.notes)
     reason: Optional[str] = None
     if scan.timed_out:
         reason = "timeout"
@@ -287,22 +289,23 @@ def _season_collection(
     elif scan.capped:
         reason = "load-cap"
         errors.append(
-            f"load-cap: stopped after {scan.loads} page loads before reaching the start of {window.label}; "
-            "the meetings listed may be incomplete."
+            f"load-cap: stopped after {scan.loads} page loads (limit {scan.cap}) before reaching the "
+            f"start of {window.label}; the meetings listed may be incomplete."
         )
     if errors:
-        return MatchCollection(status="partial", reason=reason, items=items, errors=errors)
+        return MatchCollection(status="partial", reason=reason, items=items, errors=errors, notes=notes)
     if not items:
         return MatchCollection(
             status="empty",
             reason=H2H_EMPTY_REASON,
             items=[],
             errors=[f"No meetings between {ref_a.path} and {ref_b.path} in season {window.label}."],
+            notes=notes,
         )
-    return MatchCollection(status="ok", items=items)
+    return MatchCollection(status="ok", items=items, notes=notes)
 
 
-async def _season_h2h(team_a: str, team_b: str, window: SeasonWindow, last_n, days_back) -> MatchCollection:
+async def _season_h2h(team_a: str, team_b: str, season: Optional[str], last_n, days_back) -> MatchCollection:
     budget = settings.h2h_budget_s
     deadline = time.monotonic() + budget
     scan = SeasonScan()
@@ -317,10 +320,21 @@ async def _season_h2h(team_a: str, team_b: str, window: SeasonWindow, last_n, da
     if ref_a.id == ref_b.id:
         raise ValueError("team_a and team_b are the same team.")
     try:
-        await scan_season(ref_a, ref_b, window, scan, deadline)
+        await scan_season(ref_a, ref_b, season, scan, deadline)
     except asyncio.TimeoutError:
         scan.timed_out = True
-    return _season_collection(scan, window, ref_a, ref_b, last_n, days_back, budget)
+    if scan.plan is None:
+        # Out of time before the season's dates were known.
+        return MatchCollection(
+            status="partial",
+            reason="timeout",
+            items=[],
+            errors=[
+                f"timeout: the season search stopped after {budget:.0f}s while reading the league's "
+                "season format. Retry, or pass a match URL."
+            ],
+        )
+    return _season_collection(scan, scan.plan, ref_a, ref_b, last_n, days_back, budget)
 
 
 async def get_h2h(
@@ -337,9 +351,10 @@ async def get_h2h(
         return _h2h_collection(detail, match, last_n, days_back)
 
     if team_a and team_b:
-        window = parse_season(season)
-        if window is not None:
-            return await _season_h2h(team_a, team_b, window, last_n, days_back)
+        if (season or "").strip().lower() != "all":
+            if (season or "").strip().lower() not in ("", "current"):
+                parse_label(season)  # ValueError for an unusable season, before any page loads
+            return await _season_h2h(team_a, team_b, season, last_n, days_back)
         # season="all": the full history from a meeting page, under one budget.
         try:
             return await asyncio.wait_for(

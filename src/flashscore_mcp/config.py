@@ -29,10 +29,10 @@ class Settings(BaseSettings):
     # are not loaded when it runs out are reported as timeouts in errors.
     match_budget_s: float = 40.0
     # get_h2h by team names: one overall time budget in seconds (team lookup
-    # included) and the most page loads plus "Show more" clicks the season
-    # search may spend. Results found before a bound hit are still returned.
+    # included) and the ceiling for page loads plus "Show more" clicks the
+    # season search may spend (older seasons get more, up to this). Results found before a bound hit are still returned.
     h2h_budget_s: float = 40.0
-    h2h_max_loads: int = 6
+    h2h_max_loads: int = 15
     base_url: str = "https://www.flashscore.com"
     port: int = 8000
     host: str = "0.0.0.0"
