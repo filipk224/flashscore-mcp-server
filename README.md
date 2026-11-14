@@ -6,10 +6,18 @@ Access 1000 leagues to 35 sports. Extract team names, scores, dates, games playe
 League tools accept the name with its country (Premier League (England) or NBA (USA)) as well as a Flashscore path.
 
 Available tools:
-    list_sports,
-    list_countries,
-    list_leagues,
-    get_standings,
+
+    - list_sports():
+							List of available sports.
+
+    - list_countries(sport):
+							List of countries with available leagues in a particular sport.
+
+    - list_leagues(country, sport):
+							List of leagues in a particular country in a particular sport.
+
+    - get_standings():
+							
     get_results_history,
     get_upcoming_fixtures,
     get_news,
