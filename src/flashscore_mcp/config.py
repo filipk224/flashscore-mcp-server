@@ -1,7 +1,11 @@
 """Production config. Fast scrape defaults — no human-delay padding."""
 
+import os
+from typing import Dict, List, Optional
+
 from pydantic_settings import BaseSettings
-from typing import List, Dict
+
+from .sizing import Sizing, size_for
 
 
 class Settings(BaseSettings):
@@ -20,7 +24,9 @@ class Settings(BaseSettings):
     nav_timeout_ms: int = 25000
     # Abort images, fonts, media and ad/analytics hosts in scrape pages.
     block_assets: bool = True
-    max_concurrent_pages: int = 4
+    # Browser pages open at once. Unset means computed from the run's memory
+    # and CPUs (see sizing.py); an explicit value always wins.
+    max_concurrent_pages: Optional[int] = None
     # A call that cannot get a browser slot within this many seconds fails
     # with a "busy, retry" error instead of queueing until the client gateway
     # gives up (the Apify gateway cuts requests off at about 60 s).
@@ -106,3 +112,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def apply_sizing(target: Settings, env=None, **detectors) -> Sizing:
+    """Set max_concurrent_pages from the run's size unless it was set explicitly."""
+    explicit = target.max_concurrent_pages if "max_concurrent_pages" in target.model_fields_set else None
+    chosen = size_for(dict(os.environ if env is None else env), explicit_pages=explicit, **detectors)
+    target.max_concurrent_pages = chosen.max_concurrent_pages
+    return chosen
+
+
+SIZING = apply_sizing(settings)
+
+
+def sizing_summary(chosen: Sizing = None) -> str:
+    chosen = chosen or SIZING
+    return (
+        f"Browser pool: max_concurrent_pages={chosen.max_concurrent_pages} ({chosen.pages_source}); "
+        f"memory={chosen.memory_mb} MB ({chosen.memory_source}) -> {chosen.memory_pages} pages at "
+        f"{chosen.mb_per_page} MB each after {chosen.base_mb} MB base; cpus={chosen.cpus} ({chosen.cpu_source}) "
+        f"-> {chosen.cpu_pages} pages; cap {chosen.max_pages}"
+    )

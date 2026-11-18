@@ -75,10 +75,13 @@ class BrowserManager:
                 headless=settings.headless,
                 args=settings.browser_args,
             )
+            from .config import SIZING
+
             logger.info(
-                "Browser started (headless={}, concurrent={})",
+                "Browser started (headless={}, concurrent={}, sizing={})",
                 settings.headless,
                 settings.max_concurrent_pages,
+                SIZING.pages_source,
             )
 
     async def stop(self) -> None:
