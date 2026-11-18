@@ -51,18 +51,45 @@ def _league_headers(html: str) -> list[tuple[int, str]]:
     return found
 
 
+def _round_headers(html: str) -> list[tuple[int, str]]:
+    """(position, label) of every round header row, in page order."""
+    found: list[tuple[int, str]] = []
+    for mark in _ROUND.finditer(html):
+        text = " ".join(html_lib.unescape(mark.group(1)).split())
+        if text:
+            found.append((mark.start(), text))
+    return found
+
+
 def _parse_matches_html(html: str) -> list[MatchResult]:
     marks = list(_ROW.finditer(html))
     if not marks:
         marks = list(re.finditer(r'id="g_\d+_[^"]+"', html))
     headers = _league_headers(html)
     header_pos = [pos for pos, _ in headers]
+    # A round header sits above the first game of its round only. Each row
+    # takes the nearest round header above it in the same league block. The
+    # old look-back over a fixed number of characters missed the header for
+    # long rows (period scores) and then read the *next* round's header out
+    # of the row's own tail, which put the last game of a round (often the
+    # Monday night game) in the following round.
+    rounds = _round_headers(html)
+    round_pos = [pos for pos, _ in rounds]
     games: list[MatchResult] = []
     for index, mark in enumerate(marks):
         end = marks[index + 1].start() if index + 1 < len(marks) else min(len(html), mark.start() + 12000)
         preceding = html[max(0, mark.start() - 2500) : mark.start()]
-        game = _one(html[mark.start() : end], preceding)
+        game = _one(html[mark.start() : end], preceding, positional_round=bool(rounds))
         if game:
+            if rounds:
+                at = bisect.bisect_right(round_pos, mark.start()) - 1
+                label = None
+                if at >= 0:
+                    league_at = bisect.bisect_right(header_pos, mark.start()) - 1
+                    # A league header between the round header and the row starts a new block.
+                    if league_at < 0 or header_pos[league_at] < round_pos[at]:
+                        label = rounds[at][1]
+                game.round = label
             if headers:
                 at = bisect.bisect_right(header_pos, mark.start()) - 1
                 if at >= 0 and (game.competition is None or header_pos[at] > mark.start() - 2500):
@@ -85,7 +112,7 @@ def _round_from(preceding: str) -> str | None:
     return None
 
 
-def _one(chunk: str, preceding: str = "") -> MatchResult | None:
+def _one(chunk: str, preceding: str = "", positional_round: bool = False) -> MatchResult | None:
     home = _team(chunk, "event__homeParticipant") or _team(chunk, "event__participant--home")
     away = _team(chunk, "event__awayParticipant") or _team(chunk, "event__participant--away")
     if not home or not away:
@@ -105,7 +132,8 @@ def _one(chunk: str, preceding: str = "") -> MatchResult | None:
         extras["note"] = "Final result only (no live coverage)"
     elif stage and not _DATE.search(stage) and not _CLOCK.fullmatch(stage):
         extras["stage"] = stage
-    rnd = _round_from(preceding) or _round_from(chunk)
+    # With round header rows on the page the caller assigns rounds by position.
+    rnd = None if positional_round else (_round_from(preceding) or _round_from(chunk))
     status = _status(chunk, stage, home_score, away_score)
     match_id = _match_id(chunk, preceding)
     return MatchResult(
