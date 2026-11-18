@@ -169,7 +169,13 @@
           "service": { "type": "string", "example": "flashscore-mcp" },
           "version": { "type": "string", "description": "Server version.", "example": "0.2.6" },
           "mcp_endpoint": { "type": "string", "example": "/mcp" },
-          "cache": { "type": "boolean", "description": "Always false: results are scraped fresh on every call." }
+          "cache": { "type": "boolean", "description": "Always false: results are scraped fresh on every call." },
+          "sizing": {
+            "type": "object",
+            "description": "How the browser pool was sized at startup: the run's memory and CPUs, the page limits they give, and the result (max_concurrent_pages, pages_source computed, default or env).",
+            "additionalProperties": true,
+            "example": { "memory_mb": 16384, "memory_source": "ACTOR_MEMORY_MBYTES", "cpus": 4.0, "cpu_source": "apify-memory", "memory_pages": 30, "cpu_pages": 4, "max_concurrent_pages": 4, "pages_source": "computed", "mb_per_page": 512, "base_mb": 1024, "pages_per_cpu": 1.0, "max_pages": 16 }
+          }
         }
       },
       "JsonRpcRequest": {
