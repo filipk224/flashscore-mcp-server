@@ -370,10 +370,10 @@ class ReadListAndDays(unittest.TestCase):
 
 
 class H2hSeasonFeedFallback(unittest.TestCase):
-    def test_failed_show_more_reads_the_rest_from_the_feed(self):
-        # The rendered page holds the 2026 season only; Show more does not load
-        # (slow or 503 feed host) while the page feed says 637 rows exist. The
-        # 2024 meeting must still be found from the feed batches.
+    def test_old_season_meeting_found_from_the_feed(self):
+        # The rendered page holds the 2026 season only and Show more does not
+        # load (slow or 503 feed host); the page feed says 637 rows exist. The
+        # 2024 meeting is read from the feed batches.
         import time as _time
         from contextlib import asynccontextmanager
 

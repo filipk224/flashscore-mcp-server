@@ -26,6 +26,7 @@ from loguru import logger
 
 from ..browser import _match_count, _visible_show_more, browser_manager, safe_goto
 from ..config import settings
+from ..errors import BusyError, LoadFailed
 from ..models import MatchResult
 from ..parsers.league import parse_league_page
 from ..parsers.feed import initial_feeds, parse_list_feed
@@ -213,6 +214,15 @@ async def _scan_tab(
 ) -> None:
     from .match import _involves  # local import: match imports this module
 
+    # The page's own list feed first: it pages by request (with retries)
+    # instead of clicking, and keeps exact kickoff times and rounds.
+    try:
+        if await _scan_feed(url, tab, ref_b, window, state, deadline):
+            return
+    except (BusyError, asyncio.TimeoutError):
+        raise
+    except LoadFailed as exc:
+        logger.info("h2h season scan {}: feed read failed ({}); clicking through the page", tab, exc)
     queue_wait = max(0.0, min(settings.queue_wait_s, deadline - time.monotonic()))
     async with browser_manager.new_page(queue_wait_s=queue_wait) as page:
         await _goto_list(page, url)
@@ -247,7 +257,8 @@ async def _scan_tab(
     await _scan_feed(url, tab, ref_b, window, state, deadline)
 
 
-async def _scan_feed(url, tab, ref_b, window: SeasonPlan, state: SeasonScan, deadline: float) -> None:
+async def _scan_feed(url, tab, ref_b, window: SeasonPlan, state: SeasonScan, deadline: float) -> bool:
+    """Scan the tab from its list feed. False when the page has no feed rows."""
     from .listing import fetch_listing
     from .match import _involves
 
@@ -261,14 +272,19 @@ async def _scan_feed(url, tab, ref_b, window: SeasonPlan, state: SeasonScan, dea
     if remaining <= 1:
         raise asyncio.TimeoutError()
     listing = await fetch_listing(url, enough=enough, budget_s=remaining)
-    state.loads += listing.clicks
+    if not listing.from_feed or not listing.items:
+        return False
+    state.loads += 1 + listing.clicks
     for game, day in zip(listing.items, days_of(listing.items)):
         if day is not None and window.start <= day <= window.end and game.match_id and _involves(game, ref_b):
             state.items.setdefault(game.match_id, _dated(game, day))
     logger.info("h2h season scan {} via feed: rows={} all={} complete={}", tab, len(listing.items),
                 listing.all_count, listing.complete)
     if not enough(listing.items) and not listing.complete:
+        if listing.timed_out:
+            raise asyncio.TimeoutError()
         state.capped = True
+    return True
 
 
 _LEAGUE_LINK = re.compile(r'<a[^>]*href="(/[a-z0-9\-]+/[a-z0-9\-]+/[a-z0-9\-]+/)"[^>]*class="headerLeague__title"')
