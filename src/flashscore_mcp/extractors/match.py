@@ -476,9 +476,9 @@ async def _get_h2h(
             return await _season_h2h(team_a, team_b, season, last_n, days_back, league, sport, league_only)
         # season="all": the full history from a meeting page, under one budget.
         try:
-            return await asyncio.wait_for(
+            return await _bounded(
                 _full_history_h2h(team_a, team_b, clicks, last_n, days_back, league, sport, league_only),
-                timeout=settings.h2h_budget_s,
+                settings.h2h_budget_s,
             )
         except asyncio.TimeoutError:
             raise LoadFailed(
@@ -490,6 +490,22 @@ async def _get_h2h(
     raise ValueError(
         "Pass a match URL/id, or both team_a and team_b, then optionally season, last_n or days_back."
     )
+
+
+async def _bounded(coro, timeout: float):
+    """Await ``coro`` for at most ``timeout`` seconds, then raise asyncio.TimeoutError.
+
+    Unlike asyncio.wait_for this does not wait for the cancelled work to wind
+    down: a page navigation that ignores cancellation (seen live: a match page
+    goto that ran on for minutes past the budget) cannot hold the reply.
+    """
+    task = asyncio.ensure_future(coro)
+    done, _pending = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        return task.result()
+    task.cancel()
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    raise asyncio.TimeoutError()
 
 
 async def _full_history_h2h(

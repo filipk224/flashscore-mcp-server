@@ -429,5 +429,30 @@ class H2hSeasonFeedFallback(unittest.TestCase):
         self.assertFalse(state.capped)
 
 
+
+class H2hBudget(unittest.TestCase):
+    def test_full_history_reply_is_not_held_by_work_that_ignores_cancel(self):
+        import time as _time
+
+        from flashscore_mcp.errors import LoadFailed
+        from flashscore_mcp.extractors import match
+
+        async def stubborn(*args, **kwargs):
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                await asyncio.sleep(1.0)  # a navigation winding down long after the cancel
+                raise
+
+        async def run():
+            with patch.object(match, "_full_history_h2h", stubborn), patch.object(settings, "h2h_budget_s", 0.2):
+                start = _time.monotonic()
+                with self.assertRaises(LoadFailed):
+                    await match._get_h2h(team_a="A", team_b="B", season="all")
+                return _time.monotonic() - start
+
+        self.assertLess(asyncio.run(run()), 0.8)
+
+
 if __name__ == "__main__":
     unittest.main()
