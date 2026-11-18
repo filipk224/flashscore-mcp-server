@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Optional
 
@@ -276,15 +276,22 @@ async def scan_season(
     deadline: float,
     max_loads: Optional[int] = None,
     today: Optional[date] = None,
+    league_seasons: Optional[LeagueSeasons] = None,
+    league_given: bool = False,
 ) -> None:
     """Fill ``state`` with the season's meetings; raises asyncio.TimeoutError at the deadline.
 
-    ``state.plan`` is set once the season's dates are known.
+    ``state.plan`` is set once the season's dates are known. With
+    ``league_given`` the caller's league (``league_seasons``, None when its
+    format could not be read) sets the format, and the guess from team A's
+    results page is skipped.
     """
     today = today or date.today()
     configured = max_loads if max_loads is not None else settings.h2h_max_loads
     league = None
-    if needs_league(season):
+    if league_given:
+        league = league_seasons
+    elif needs_league(season):
         try:
             league = await asyncio.wait_for(
                 read_league_seasons(ref_a, deadline, state),
@@ -293,6 +300,14 @@ async def scan_season(
         except asyncio.TimeoutError:
             raise
     plan = plan_season(season, league, today)
+    if not league_given and league is not None:
+        plan = replace(
+            plan,
+            notes=plan.notes + (
+                f"{league.name} was taken as the main league of {getattr(ref_a, 'name', None) or ref_a.path} "
+                "from its results page; pass league to choose it.",
+            ),
+        )
     state.plan = plan
     cap = state.cap = effective_cap(configured, plan)
     tabs = []
