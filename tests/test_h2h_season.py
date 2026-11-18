@@ -222,7 +222,7 @@ class ScanBehaviour(unittest.TestCase):
 
 class GetH2HBySeason(unittest.TestCase):
     def _run(self, scan_fn, **kw):
-        async def fake_resolve(name):
+        async def fake_resolve(name, **_kw):
             return {"Arsenal": ARS, "Chelsea": CHE}[name]
 
         async def run():
@@ -304,7 +304,7 @@ class GetH2HBySeason(unittest.TestCase):
         async def slow_scan(ref_a, ref_b, window, state, deadline, **kw):
             await asyncio.sleep(0.5)  # ignores the deadline; the budget must still bound it
 
-        async def slow_resolve(name):
+        async def slow_resolve(name, **_kw):
             await asyncio.sleep(5)
 
         async def run():

@@ -277,7 +277,7 @@ class GetMatchAndH2HTools(unittest.TestCase):
         ) + "</div>"
         loaded = []
 
-        async def fake_resolve(name):
+        async def fake_resolve(name, **_kw):
             return refs[name]
 
         async def fake_fetch(url, *args, **kwargs):
