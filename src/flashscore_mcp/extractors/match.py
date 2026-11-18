@@ -238,17 +238,30 @@ def _more_clicks(last_n: Optional[int], days_back: Optional[int]) -> int:
 
 
 async def _find_meeting(ref_a: TeamRef, ref_b: TeamRef) -> Optional[str]:
-    """Any game between the two teams, from team A's fixtures then results."""
-    for tab, until in (("fixtures", None), ("results", 80)):
+    """Any game between the two teams, from team A's fixtures then results.
+
+    The list is read from the page's feed and stops at the first meeting (or
+    after about 120 results), instead of always expanding 80 rendered rows.
+    """
+    from .listing import fetch_listing
+
+    def found(rows) -> bool:
+        return any(_involves(g, ref_b) and g.match_id for g in rows)
+
+    for tab, cap in (("fixtures", None), ("results", 120)):
         url = f"{ref_a.url}{tab}/"
+
+        def enough(rows, cap=cap) -> bool:
+            return found(rows) or cap is None or len(rows) >= cap
+
         try:
-            html = await fetch_html(url, full=until is not None, until_count=until)
+            listing = await fetch_listing(url, enough=enough)
         except BusyError:
             raise
         except LoadFailed as exc:
             logger.warning("h2h meeting search {} failed: {}", url, exc)
             continue
-        for game in parse_matches(html):
+        for game in listing.items:
             if _involves(game, ref_b) and game.match_id:
                 logger.info("h2h meeting for {} v {} -> {}", ref_a.path, ref_b.path, game.match_id)
                 return game.match_id
@@ -407,6 +420,38 @@ async def _season_h2h(
 
 
 async def get_h2h(
+    match: Optional[str] = None,
+    team_a: Optional[str] = None,
+    team_b: Optional[str] = None,
+    last_n: Optional[int] = None,
+    days_back: Optional[int] = None,
+    season: Optional[str] = None,
+    league: Optional[str] = None,
+    sport: Optional[str] = None,
+    league_only: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    from ..timeutil import zone_name
+    from .league_teams import infer_sport
+
+    zone_name(timezone)  # ValueError for an unknown zone, before any page loads
+    sport = infer_sport(league, sport)
+    result = await _get_h2h(match, team_a, team_b, last_n, days_back, season, league, sport, league_only)
+    return finish_collection(result, timezone)
+
+
+def finish_collection(result: MatchCollection, timezone: Optional[str] = None) -> MatchCollection:
+    """Normalised stage fields and labelled (optionally converted) times on every row."""
+    from ..parsers.stage import apply_stage
+    from ..timeutil import localize, zone_name
+
+    rows = [apply_stage(g) if isinstance(g, MatchResult) else g for g in result.items]
+    result.items = localize(rows, timezone) if all(isinstance(g, MatchResult) for g in rows) else rows
+    result.timezone = zone_name(timezone)
+    return result
+
+
+async def _get_h2h(
     match: Optional[str] = None,
     team_a: Optional[str] = None,
     team_b: Optional[str] = None,

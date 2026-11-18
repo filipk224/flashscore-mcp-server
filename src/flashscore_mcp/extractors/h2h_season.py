@@ -28,8 +28,10 @@ from ..browser import _match_count, _visible_show_more, browser_manager, safe_go
 from ..config import settings
 from ..models import MatchResult
 from ..parsers.league import parse_league_page
+from ..parsers.feed import initial_feeds, parse_list_feed
 from ..parsers.matches import parse_matches
 from ..seasons import LeagueSeasons, SeasonPlan, needs_league, plan_season
+from ..timeutil import game_day
 
 @dataclass
 class SeasonScan:
@@ -123,7 +125,37 @@ def _past_boundary(days: list[Optional[date]], window: SeasonPlan, tab: str) -> 
 
 def _dated(game: MatchResult, day: date) -> MatchResult:
     """Copy of the row with its full date, so callers see the year."""
-    return game.model_copy(update={"date": day.strftime("%d.%m.%Y")})
+    from ..parsers.stage import apply_stage
+
+    return apply_stage(game.model_copy(update={"date": day.strftime("%d.%m.%Y")}))
+
+
+def dated_rows(html: str, tab: str, today: date) -> tuple[list[MatchResult], list[Optional[date]]]:
+    """Rendered rows with full dates.
+
+    The page's embedded feed gives the exact kick-off (UTC) of the rows it
+    lists, which covers the first batch of a team page (about two seasons);
+    rows loaded later by "Show more" fall back to assign_years.
+    """
+
+    games = parse_matches(html)
+    days = assign_years(games, tab, today)
+    feed_text, _count = initial_feeds(html).get(tab, ("", None))
+    if feed_text:
+        exact = {g.match_id: g for g in parse_list_feed(feed_text) if g.match_id and g.kickoff_utc}
+        out_games: list[MatchResult] = []
+        for index, game in enumerate(games):
+            known = exact.get(game.match_id)
+            if known is not None:
+                game = game.model_copy(update={
+                    "kickoff_utc": known.kickoff_utc, "timezone": "UTC",
+                    "time": known.time, "round": known.round or game.round,
+                    "competition": known.competition or game.competition,
+                })
+                days[index] = game_day(game)
+            out_games.append(game)
+        games = out_games
+    return games, days
 
 
 async def _show_more_once(page) -> bool:
@@ -186,8 +218,7 @@ async def _scan_tab(
         await _goto_list(page, url)
         state.loads += 1
         while True:
-            games = parse_matches(await page.content())
-            days = assign_years(games, tab, today)
+            games, days = dated_rows(await page.content(), tab, today)
             for game, day in zip(games, days):
                 if (
                     day is not None
@@ -203,8 +234,41 @@ async def _scan_tab(
                     state.capped = True
                 return
             if not await _show_more_once(page):
-                return  # the list is exhausted: nothing older/newer exists
+                html = await page.content()
+                break  # no rows added: exhausted, or the click did not load
             state.loads += 1
+    # The click added nothing. When the page's feed says the list has more
+    # rows than are rendered, the Show more request failed (slow or 503 feed
+    # host): read the rest from the feed batches instead of calling the list
+    # exhausted.
+    _feed, count = initial_feeds(html).get(tab, ("", None))
+    if not count or count <= len(games):
+        return
+    await _scan_feed(url, tab, ref_b, window, state, deadline)
+
+
+async def _scan_feed(url, tab, ref_b, window: SeasonPlan, state: SeasonScan, deadline: float) -> None:
+    from .listing import fetch_listing
+    from .match import _involves
+
+    def days_of(rows):
+        return [game_day(g) for g in rows]
+
+    def enough(rows) -> bool:
+        return _past_boundary(days_of(rows), window, tab)
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 1:
+        raise asyncio.TimeoutError()
+    listing = await fetch_listing(url, enough=enough, budget_s=remaining)
+    state.loads += listing.clicks
+    for game, day in zip(listing.items, days_of(listing.items)):
+        if day is not None and window.start <= day <= window.end and game.match_id and _involves(game, ref_b):
+            state.items.setdefault(game.match_id, _dated(game, day))
+    logger.info("h2h season scan {} via feed: rows={} all={} complete={}", tab, len(listing.items),
+                listing.all_count, listing.complete)
+    if not enough(listing.items) and not listing.complete:
+        state.capped = True
 
 
 _LEAGUE_LINK = re.compile(r'<a[^>]*href="(/[a-z0-9\-]+/[a-z0-9\-]+/[a-z0-9\-]+/)"[^>]*class="headerLeague__title"')

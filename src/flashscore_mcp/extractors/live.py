@@ -16,7 +16,8 @@ from .fetch import DayPage, fetch_day, fetch_html
 from ..errors import BusyError
 from .page_status import LoadFailed, page_outcome
 from .resolve import parse_name_and_country, resolve_league_ref
-from .results import _league_url
+from .results import _league_url, read_list, resolve_archive_season
+from ..timeutil import game_day, localize, today, zone_name
 
 _SPORT_ALIASES = {"soccer": "football"}
 _STATUS_ALIASES = {
@@ -48,13 +49,14 @@ def normalize_status(status: Optional[str]) -> str:
     return _STATUS_ALIASES[key]
 
 
-def resolve_day_offset(day_offset: Optional[int], date_str: Optional[str]) -> int:
+def resolve_day_offset(day_offset: Optional[int], date_str: Optional[str], tz: Optional[str] = None) -> int:
+    """Days from today (in tz, UTC by default) to the requested day."""
     if date_str:
         try:
             target = datetime.strptime(date_str.strip(), "%Y-%m-%d").date()
         except ValueError as exc:
             raise ValueError("date must be YYYY-MM-DD") from exc
-        return (target - date.today()).days
+        return (target - today(tz)).days
     if day_offset is None:
         return 0
     return int(day_offset)
@@ -83,8 +85,8 @@ def _parse_game_date(value: Optional[str]) -> Optional[date]:
     return None
 
 
-def _target_date(day_offset: int) -> date:
-    return date.today() + timedelta(days=day_offset)
+def _target_date(day_offset: int, tz: Optional[str] = None) -> date:
+    return today(tz) + timedelta(days=day_offset)
 
 
 def filter_status(items: list[MatchResult], status: str) -> list[MatchResult]:
@@ -204,21 +206,30 @@ async def get_matches_by_day(
     date: Optional[str] = None,
     status: str = "all",
     league: Optional[str] = None,
+    timezone: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    compact: bool = False,
 ) -> MatchCollection:
+    from .listing import build_filters, check_paging, page_collection
+
     sport = normalize_sport(sport)
     wanted_status = normalize_status(status)
-    offset = resolve_day_offset(day_offset, date)
-    target = _target_date(offset)
+    tz_label = zone_name(timezone)  # ValueError for an unknown zone
+    off, lim = check_paging(offset, limit)
+    day_offset_v = resolve_day_offset(day_offset, date, timezone)
+    target = _target_date(day_offset_v, timezone)
     resolved = await _optional_league_path(league, None)
+    day_filter = build_filters(target.isoformat(), target.isoformat(), timezone=timezone)
 
-    if abs(offset) <= MAX_PICKER_DAYS:
+    if abs(day_offset_v) <= MAX_PICKER_DAYS:
         day_sport = sport
         if resolved and not resolved.startswith("http"):
             day_sport = resolved.strip("/").split("/")[0] or sport
-        url = _sport_day_url(day_sport, offset)
-        logger.info("get_matches_by_day url={} offset={} league={}", url, offset, resolved)
-        day = await fetch_day(url, offset)
-        if offset != 0 and not day.feed and not _label_matches(day.label, target):
+        url = _sport_day_url(day_sport, day_offset_v)
+        logger.info("get_matches_by_day url={} offset={} league={} tz={}", url, day_offset_v, resolved, tz_label)
+        day = await fetch_day(url, day_offset_v, timezone_id=tz_label)
+        if day_offset_v != 0 and not day.feed and not _label_matches(day.label, target):
             raise LoadFailed(
                 f"Could not switch the {day_sport} page to {target.isoformat()} "
                 f"(day picker showed {day.label!r}).",
@@ -228,60 +239,119 @@ async def get_matches_by_day(
         if day.feed:
             # A day feed also carries late games from the evening before and
             # early ones after midnight; keep only the requested date.
-            parsed = [game for game in parsed if _same_day(game, target)]
+            parsed = [game for game in parsed if _same_day(game, target, timezone)]
         items = filter_status(parsed, wanted_status)
         if items:
-            return MatchCollection(status="ok", items=items)
+            from ..parsers.stage import apply_stage
+
+            page = page_collection(
+                [apply_stage(g) for g in items], build_filters(timezone=timezone), off, lim, compact,
+                complete=True, newest_first=False,
+            )
+            page.notes[-1] = page.notes[-1].replace("oldest first", "in page order")
+            return page
         if day.feed or parsed:
             # The day loaded; that league or status simply has no games.
-            return MatchCollection(status="empty", reason="no-matches-scheduled", items=[])
-        return _collection(day.html, [], "day")
+            return MatchCollection(status="empty", reason="no-matches-scheduled", items=[], timezone=tz_label)
+        empty = _collection(day.html, [], "day")
+        empty.timezone = tz_label
+        return empty
 
     if resolved:
-        results_url = _league_url(resolved, "current", "results")
-        fixtures_url = _league_url(resolved, "current", "fixtures")
-        logger.info("get_matches_by_day league results={} fixtures={}", results_url, fixtures_url)
-        html_parts: list[str] = []
-        items: list[MatchResult] = []
-        errors: list[str] = []
-        for url in (results_url, fixtures_url):
-            try:
-                html = await fetch_html(url, full=True)
-                html_parts.append(html)
-                items.extend(parse_matches(html))
-            except BusyError:
-                raise
-            except LoadFailed as exc:
-                errors.append(f"{url}: {exc.reason}")
-        dated = [game for game in items if _same_day(game, target)]
-        dated = filter_status(dated, wanted_status)
-        if dated:
-            return MatchCollection(
-                status="partial" if errors else "ok",
-                reason="section-failed" if errors else None,
-                items=dated,
-                errors=errors,
-            )
-        html = html_parts[0] if html_parts else ""
-        if not html and errors:
-            raise LoadFailed("Failed to load day listing for that league.", reason="source-refused")
-        if items:
-            return MatchCollection(
-                status="partial" if errors else "empty",
-                reason="section-failed" if errors else "no-matches-scheduled",
-                items=[],
-                errors=errors,
-            )
-        empty = _collection(html, [], "day")
-        empty.errors = errors
-        if errors:
-            empty.status = "partial" if empty.status == "ok" else empty.status
-        return empty
+        return await _league_day(resolved, target, wanted_status, timezone, off, lim, compact, day_filter)
 
     raise ValueError(
         f"Flashscore's day picker covers {MAX_PICKER_DAYS} days either side of today. "
-        "For an older or later date pass a league, which reads that league's results and fixtures."
+        "For an older or later date pass a league (such as 'NFL' or 'Premier League (England)'), "
+        "which reads that day from the league's season results or fixtures."
     )
+
+
+async def _season_url_for(resolved: str, target: date) -> tuple[Optional[str], Optional[str]]:
+    """(season base URL, season name) of the league season that contains target."""
+    from ..seasons import CALENDAR, archive_name_for, format_from_archive
+    from .results import archive_seasons
+
+    seasons = await archive_seasons(resolved)
+    names = [item.name for item in seasons]
+    fmt = format_from_archive(names)
+    if fmt is None:
+        return None, None
+    start_year = target.year if fmt == CALENDAR else (target.year if target.month >= 7 else target.year - 1)
+    name = archive_name_for(names, start_year, fmt)
+    if not name:
+        return None, None
+    url = next((item.url for item in seasons if item.name == name), None)
+    if not url:
+        return None, name
+    from urllib.parse import urljoin
+
+    return urljoin(settings.base_url, url).rstrip("/") + "/", name
+
+
+async def _league_day(
+    resolved: str,
+    target: date,
+    wanted_status: str,
+    timezone: Optional[str],
+    off: int,
+    lim: Optional[int],
+    compact: bool,
+    day_filter,
+) -> MatchCollection:
+    """A date outside the day picker: that league's season list for the date."""
+    base, season_name = await _season_url_for(resolved, target)
+    notes: list[str] = []
+    if base is None:
+        base = _league_url(resolved, "current", "")
+        notes.append("The season for that date could not be found in the league's archive; the current season was read.")
+    else:
+        notes.append(f"Read {season_name} ({base}).")
+    now = today(timezone)
+    tabs = []
+    if target <= now:
+        tabs.append("results")
+    if target >= now:
+        tabs.append("fixtures")
+    keep_status = None if wanted_status == "all" else wanted_status
+    pages: list[MatchCollection] = []
+    errors: list[str] = []
+    for tab in tabs:
+        try:
+            pages.append(
+                await read_list(
+                    f"{base}{tab}/",
+                    tab,
+                    offset=off,
+                    limit=lim,
+                    date_from=target.isoformat(),
+                    date_to=target.isoformat(),
+                    compact=compact,
+                    timezone=timezone,
+                    newest_first=(tab == "results"),
+                    keep_status=keep_status,
+                    notes=list(notes),
+                )
+            )
+        except BusyError:
+            raise
+        except LoadFailed as exc:
+            errors.append(f"{tab}: {exc.reason}")
+    if not pages:
+        raise LoadFailed("Failed to load the day listing for that league.", reason="source-refused")
+    page = pages[0]
+    for extra in pages[1:]:
+        page.items.extend(extra.items)
+        page.returned = len(page.items)
+        page.has_more = bool(page.has_more or extra.has_more)
+        if extra.status == "ok":
+            page.status, page.reason = "ok", None
+    page.errors.extend(errors)
+    if errors and page.status == "ok":
+        page.status, page.reason = "partial", "section-failed"
+    if page.status == "empty":
+        page.reason = "no-matches-scheduled"
+    return page
 
 
 def _label_matches(label: Optional[str], target: date) -> bool:
@@ -290,8 +360,8 @@ def _label_matches(label: Optional[str], target: date) -> bool:
     return target.strftime("%B") in label and str(target.day) in label
 
 
-def _same_day(game: MatchResult, target: date) -> bool:
-    parsed = _parse_game_date(game.date)
+def _same_day(game: MatchResult, target: date, tz: Optional[str] = None) -> bool:
+    parsed = game_day(game, tz) or _parse_game_date(game.date)
     if parsed is None:
         return False
     return parsed == target
