@@ -350,7 +350,9 @@ class QueueWaitCap(unittest.TestCase):
         async def busy(*args, **kwargs):
             raise BusyError("busy, retry: test")
 
-        with patch.object(match_ext, "fetch_html", side_effect=busy):
+        from flashscore_mcp.extractors import listing
+
+        with patch.object(listing, "fetch_listing", side_effect=busy):
             with self.assertRaises(BusyError):
                 asyncio.run(match_ext._find_meeting(_ref("a"), _ref("b")))
 
