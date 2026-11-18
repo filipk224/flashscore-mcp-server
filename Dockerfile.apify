@@ -14,8 +14,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/usr/src/app/src \
     PORT=8000 \
     HOST=0.0.0.0 \
-    FLASHSCORE_HEADLESS=true \
-    FLASHSCORE_MAX_CONCURRENT_PAGES=2
+    FLASHSCORE_HEADLESS=true
+
+# FLASHSCORE_MAX_CONCURRENT_PAGES is not set here on purpose: the server sizes
+# its browser pool from the run's memory (ACTOR_MEMORY_MBYTES) and CPUs, for
+# any run size (about 1 page per CPU: 4 on 16 GB, 16 on 64 GB). Set it in the
+# Actor's environment variables to override.
 
 # Keep the base image WORKDIR (/usr/src/app). Its ENTRYPOINT is
 # ./xvfb-entrypoint.sh, resolved against WORKDIR. WORKDIR /app made

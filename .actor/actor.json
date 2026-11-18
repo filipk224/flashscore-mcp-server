@@ -16,7 +16,6 @@
   "webServerMcpPath": "/mcp",
   "defaultMemoryMbytes": 2048,
   "minMemoryMbytes": 1024,
-  "maxMemoryMbytes": 4096,
   "webServerSchema": "./openapi.json",
   "storages": {
     "dataset": "./dataset_schema.json",
