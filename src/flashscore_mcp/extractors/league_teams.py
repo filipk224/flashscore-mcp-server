@@ -182,6 +182,22 @@ def pick_league_hit(results, name: str, country: Optional[str], sport: str) -> O
     return scored[0][1]
 
 
+def infer_sport(league: Optional[str], sport: Optional[str]) -> str:
+    """The caller's sport, else the league's (a path or a well-known name such as 'NFL'), else football."""
+    if sport and sport.strip():
+        return sport
+    raw = (league or "").strip()
+    if raw:
+        direct = path_from_url(raw)
+        if direct:
+            return direct.split("/")[0]
+        name, _country = parse_league_text(raw)
+        known = WELL_KNOWN.get(normalize_key(name))
+        if known:
+            return known.split("/")[0]
+    return "football"
+
+
 async def resolve_league_path(league: str, sport: str = "football") -> tuple[str, str]:
     """(sport/country/slug, how it was found) for a league of the given sport."""
     raw = (league or "").strip()

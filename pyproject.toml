@@ -1,6 +1,6 @@
 [project]
 name = "flashscore-mcp-server"
-version = "0.2.1"
+version = "0.2.9"
 description = "Private production MCP server for Flashscore.com — hardened extractors, no cache"
 requires-python = ">=3.11"
 dependencies = [
@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "loguru>=0.7",
     "tenacity",
+    "tzdata>=2024.1",
 ]
 
 [project.scripts]
