@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     # season search may spend (older seasons get more, up to this). Results found before a bound hit are still returned.
     h2h_budget_s: float = 40.0
     h2h_max_loads: int = 15
+    # Results/fixtures/team lists: one time budget in seconds for loading a
+    # list (page load plus "Show more" batches). Rows loaded before it runs
+    # out are returned as a partial page.
+    list_budget_s: float = 45.0
+    # Byte budget of one list page (JSON). The connector gateway keeps about
+    # 20 KB of a response and drops the rest, so pages stay well under it;
+    # callers page on with offset/next_offset.
+    page_bytes: int = 9000
+    # Seconds a read list is reused for the next page: current-season lists
+    # (scores change) and archived seasons (fixed).
+    list_cache_s: float = 90.0
+    list_cache_archive_s: float = 1800.0
     base_url: str = "https://www.flashscore.com"
     port: int = 8000
     host: str = "0.0.0.0"
