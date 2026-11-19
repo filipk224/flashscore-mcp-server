@@ -1,6 +1,8 @@
 """Single-match detail and head-to-head."""
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
@@ -10,10 +12,16 @@ from ..models import MatchCollection, MatchDetail, MatchResult
 from ..parsers.adapter import count_match_hints
 from ..parsers.match_detail import parse_h2h, parse_incidents, parse_lineups, parse_stats, parse_summary
 from .fetch import fetch_html
+from ..seasons import SeasonPlan, parse_label
+from .h2h_season import SeasonScan, scan_season
+from .league_teams import competition_matches, load_league, match_league_team
+from .resolve import parse_name_and_country
 from .match_page import load_match_page
 from .match_ref import resolve_match_ref
+from ..config import settings
+from ..errors import SECTION_TIMEOUT, BusyError
 from .page_status import LoadFailed, page_outcome
-from .team import TeamRef, resolve_team
+from .team import TeamRef, resolve_team, team_note, team_ref_from_url
 from ..parsers.matches import parse_matches
 
 ALL_SECTIONS = ("summary", "stats", "incidents", "lineups", "h2h")
@@ -93,6 +101,9 @@ async def get_match(
             incidents = parse_incidents(summary_html)
             if incidents:
                 detail.incidents = incidents
+                detail.errors.pop("incidents", None)
+            elif "incidents" in detail.errors:
+                pass  # the timeline did not render in time: keep the timeout error
             elif detail.home_team and detail.away_team:
                 # Hydrated page with no timeline: a scheduled game or one
                 # without incidents is empty, not failed.
@@ -133,6 +144,12 @@ async def get_match(
         detail.status = "partial"
         detail.reason = "section-failed"
     elif not got_identity and not requested_payload:
+        if detail.errors and all(str(v).startswith("timeout") for v in detail.errors.values()):
+            raise LoadFailed(
+                f"Timed out loading match {match_id}: nothing was read within the time budget. "
+                "Retry; the page may be slow to start.",
+                reason=SECTION_TIMEOUT,
+            )
         html = summary_html or next(iter(fetched.values()), "")
         status, reason = page_outcome(html, tab="match", parsed_count=0)
         if status == "failed" or not html:
@@ -226,6 +243,8 @@ async def _find_meeting(ref_a: TeamRef, ref_b: TeamRef) -> Optional[str]:
         url = f"{ref_a.url}{tab}/"
         try:
             html = await fetch_html(url, full=until is not None, until_count=until)
+        except BusyError:
+            raise
         except LoadFailed as exc:
             logger.warning("h2h meeting search {} failed: {}", url, exc)
             continue
@@ -251,34 +270,220 @@ def _h2h_collection(detail: MatchDetail, label: str, last_n, days_back) -> Match
     return MatchCollection(status="ok", items=items)
 
 
+def _season_collection(
+    scan: SeasonScan, window: SeasonPlan, ref_a: TeamRef, ref_b: TeamRef, last_n, days_back, budget_s: float
+) -> MatchCollection:
+    games = sorted(
+        scan.items.values(),
+        key=lambda g: _parse_game_date(g.date) or date.min,
+        reverse=True,
+    )
+    items = filter_history(games, last_n, days_back)
+    errors: list[str] = []
+    notes = list(window.notes)
+    reason: Optional[str] = None
+    if scan.timed_out:
+        reason = "timeout"
+        errors.append(
+            f"timeout: the {window.label} search stopped after {budget_s:.0f}s; "
+            "the meetings listed may be incomplete. Retry, or pass a match URL."
+        )
+    elif scan.capped:
+        reason = "load-cap"
+        errors.append(
+            f"load-cap: stopped after {scan.loads} page loads (limit {scan.cap}) before reaching the "
+            f"start of {window.label}; the meetings listed may be incomplete."
+        )
+    if errors:
+        return MatchCollection(status="partial", reason=reason, items=items, errors=errors, notes=notes)
+    if not items:
+        return MatchCollection(
+            status="empty",
+            reason=H2H_EMPTY_REASON,
+            items=[],
+            errors=[f"No meetings between {ref_a.path} and {ref_b.path} in season {window.label}."],
+            notes=notes,
+        )
+    return MatchCollection(status="ok", items=items, notes=notes)
+
+
+async def _resolve_pair(team_a: str, team_b: str, sport: str, context) -> tuple[TeamRef, TeamRef, list[str]]:
+    """Both teams, the league's own teams first when a league was given."""
+    refs: list[TeamRef] = []
+    notes: list[str] = []
+    for name in (team_a, team_b):
+        ref = team_ref_from_url(name)
+        how = "from the URL"
+        close = None
+        if ref is None and context is not None:
+            found, close = match_league_team(parse_name_and_country(name)[0], context.teams)
+            if found:
+                ref = TeamRef(slug=found.slug, id=found.id, name=found.display)
+                how = f"from {context.name} teams"
+        if ref is None:
+            ref = await resolve_team(name, sport=sport)
+            how = f"by Flashscore search ({sport})"
+            if context is not None:
+                how += f", not found among {context.name} teams"
+        refs.append(ref)
+        note = team_note(name, ref, how)
+        notes.append(f"{note} {close}" if close else note)
+    return refs[0], refs[1], notes
+
+
+def _league_filter(scan: SeasonScan, context, league_only: bool, notes: list[str]) -> None:
+    if context is None:
+        return
+    if not league_only:
+        notes.append("All competitions included; pass league_only=true for league games only.")
+        return
+    if not context.competition:
+        notes.append("league_only ignored: the league's competition label could not be read; all competitions included.")
+        return
+    scan.items = {k: g for k, g in scan.items.items() if competition_matches(g.competition, context)}
+    notes.append(f"Only {context.competition} meetings (league_only).")
+
+
+async def _season_h2h(
+    team_a: str,
+    team_b: str,
+    season: Optional[str],
+    last_n,
+    days_back,
+    league: Optional[str] = None,
+    sport: str = "football",
+    league_only: bool = False,
+) -> MatchCollection:
+    budget = settings.h2h_budget_s
+    deadline = time.monotonic() + budget
+    scan = SeasonScan()
+    context = None
+    pre_notes: list[str] = []
+    try:
+        if league:
+            context = await asyncio.wait_for(
+                load_league(league, sport, deadline), timeout=max(0.1, deadline - time.monotonic())
+            )
+            pre_notes.append(f"League: {context.name} ({context.url}), resolved by {context.source}.")
+        ref_a, ref_b, team_notes = await asyncio.wait_for(
+            _resolve_pair(team_a, team_b, sport, context), timeout=max(0.1, deadline - time.monotonic())
+        )
+        pre_notes.extend(team_notes)
+    except asyncio.TimeoutError:
+        raise LoadFailed(
+            f"Timed out after {budget:.0f}s looking up the {'league and ' if league else ''}teams. Retry, or pass team URLs.",
+            reason=SECTION_TIMEOUT,
+        ) from None
+    if ref_a.id == ref_b.id:
+        raise ValueError("team_a and team_b are the same team.")
+    try:
+        await scan_season(
+            ref_a,
+            ref_b,
+            season,
+            scan,
+            deadline,
+            league_seasons=context.seasons if context else None,
+            league_given=context is not None,
+        )
+    except asyncio.TimeoutError:
+        scan.timed_out = True
+    if scan.plan is None:
+        # Out of time before the season's dates were known.
+        return MatchCollection(
+            status="partial",
+            reason="timeout",
+            items=[],
+            errors=[
+                f"timeout: the season search stopped after {budget:.0f}s while reading the league's "
+                "season format. Retry, or pass a match URL."
+            ],
+            notes=pre_notes,
+        )
+    _league_filter(scan, context, league_only, pre_notes)
+    result = _season_collection(scan, scan.plan, ref_a, ref_b, last_n, days_back, budget)
+    result.notes = pre_notes + list(result.notes)
+    return result
+
+
 async def get_h2h(
     match: Optional[str] = None,
     team_a: Optional[str] = None,
     team_b: Optional[str] = None,
     last_n: Optional[int] = None,
     days_back: Optional[int] = None,
+    season: Optional[str] = None,
+    league: Optional[str] = None,
+    sport: str = "football",
+    league_only: bool = False,
 ) -> MatchCollection:
     clicks = _more_clicks(last_n, days_back)
+    if league_only and not league:
+        raise ValueError("league_only needs a league.")
     if match:
         detail = await get_match(match, sections=["h2h"], h2h_more=clicks)
         return _h2h_collection(detail, match, last_n, days_back)
 
     if team_a and team_b:
-        ref_a = await resolve_team(team_a)
-        ref_b = await resolve_team(team_b)
-        if ref_a.id == ref_b.id:
-            raise ValueError("team_a and team_b are the same team.")
-        meeting = await _find_meeting(ref_a, ref_b)
-        if not meeting:
-            meeting = await _find_meeting(ref_b, ref_a)
-        if not meeting:
-            return MatchCollection(
-                status="empty",
-                reason=H2H_EMPTY_REASON,
-                items=[],
-                errors=[f"No recent or scheduled game between {ref_a.path} and {ref_b.path} to read H2H from."],
+        if (season or "").strip().lower() != "all":
+            if (season or "").strip().lower() not in ("", "current"):
+                parse_label(season)  # ValueError for an unusable season, before any page loads
+            return await _season_h2h(team_a, team_b, season, last_n, days_back, league, sport, league_only)
+        # season="all": the full history from a meeting page, under one budget.
+        try:
+            return await asyncio.wait_for(
+                _full_history_h2h(team_a, team_b, clicks, last_n, days_back, league, sport, league_only),
+                timeout=settings.h2h_budget_s,
             )
-        detail = await get_match(meeting, sections=["h2h"], h2h_more=clicks)
-        return _h2h_collection(detail, f"{team_a} v {team_b}", last_n, days_back)
+        except asyncio.TimeoutError:
+            raise LoadFailed(
+                f"Timed out after {settings.h2h_budget_s:.0f}s reading head-to-head for {team_a} v {team_b}. "
+                "Retry, use a single season, or pass a match URL.",
+                reason=SECTION_TIMEOUT,
+            ) from None
 
-    raise ValueError("Pass a match URL/id, or both team_a and team_b, then optionally last_n or days_back.")
+    raise ValueError(
+        "Pass a match URL/id, or both team_a and team_b, then optionally season, last_n or days_back."
+    )
+
+
+async def _full_history_h2h(
+    team_a: str,
+    team_b: str,
+    clicks: int,
+    last_n,
+    days_back,
+    league: Optional[str] = None,
+    sport: str = "football",
+    league_only: bool = False,
+) -> MatchCollection:
+    context = await load_league(league, sport) if league else None
+    ref_a, ref_b, notes = await _resolve_pair(team_a, team_b, sport, context)
+    if context is not None:
+        notes.insert(0, f"League: {context.name} ({context.url}), resolved by {context.source}.")
+    if ref_a.id == ref_b.id:
+        raise ValueError("team_a and team_b are the same team.")
+    meeting = await _find_meeting(ref_a, ref_b)
+    if not meeting:
+        meeting = await _find_meeting(ref_b, ref_a)
+    if not meeting:
+        return MatchCollection(
+            status="empty",
+            reason=H2H_EMPTY_REASON,
+            items=[],
+            errors=[f"No recent or scheduled game between {ref_a.path} and {ref_b.path} to read H2H from."],
+            notes=notes,
+        )
+    detail = await get_match(meeting, sections=["h2h"], h2h_more=clicks)
+    result = _h2h_collection(detail, f"{team_a} v {team_b}", last_n, days_back)
+    if context is not None:
+        if league_only and context.competition:
+            kept = [g for g in result.items if competition_matches(g.competition, context)]
+            notes.append(f"Only {context.competition} meetings (league_only).")
+            result = result.model_copy(update={"items": kept})
+            if not kept and result.status == "ok":
+                result = result.model_copy(update={"status": "empty", "reason": H2H_EMPTY_REASON})
+        else:
+            notes.append("All competitions included.")
+    result.notes = notes + list(result.notes)
+    return result

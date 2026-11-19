@@ -41,6 +41,12 @@ async def root(request: Request) -> PlainTextResponse:
     )
 
 
+def _sizing_info() -> dict:
+    from .config import SIZING
+
+    return SIZING.as_dict()
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health(request: Request) -> JSONResponse:
     return JSONResponse(
@@ -50,6 +56,7 @@ async def health(request: Request) -> JSONResponse:
             "version": __version__,
             "mcp_endpoint": "/mcp",
             "cache": False,
+            "sizing": _sizing_info(),
         }
     )
 
@@ -161,9 +168,15 @@ async def get_h2h(
     team_b: Optional[str] = None,
     last_n: Optional[int] = None,
     days_back: Optional[int] = None,
+    season: Optional[str] = None,
+    league: Optional[str] = None,
+    sport: str = "football",
+    league_only: bool = False,
 ) -> MatchCollection:
-    """Head-to-head history. Pass a match_id or match_url, or both team_a and team_b. last_n keeps the newest N meetings; days_back keeps meetings in that many days. You can also request h2h as a get_match section."""
-    return await match_ext.get_h2h(match, team_a, team_b, last_n, days_back)
+    """Head-to-head history. Pass a match_id or match_url (full history from that match's H2H tab), or both team_a and team_b. With team names the search is limited to one season, because two teams meet only a few times in a season. Optional league (a name such as 'MLS', 'Premier League' or 'England: Premier League', or a path like /football/england/premier-league/) is strongly recommended with team names: team names are matched among that league's teams first, so short forms work ('LAFC', 'LA Galaxy', 'Man Utd'), and the season follows that league's format. sport (default football) limits league and team search to that sport. Without league, teams come from Flashscore search within the sport and the season format is taken from team_a's main league. The season format is a calendar year such as '2025' for MLS, or a split year such as '2025/2026' for the Premier League. season defaults to the current one; pass '2025', '2025/26' or '2025-2026' (the same labels as the archive page); season='all' reads the full history instead (slower). If the format cannot be read, July to June is assumed. notes say which teams and league were used and how the season was decided. Meetings in all competitions are included; league_only=true keeps only that league's games. The search has a time budget and a page-load cap, so a result with status 'partial' and reason 'timeout' or 'load-cap' (see errors) may be missing meetings, while status 'empty' with reason 'no-meetings' means the teams did not meet in that season. last_n keeps the newest N meetings; days_back keeps meetings in that many days. You can also request h2h as a get_match section."""
+    return await match_ext.get_h2h(
+        match, team_a, team_b, last_n, days_back, season, league, sport, league_only
+    )
 
 
 @mcp.tool()
@@ -179,13 +192,22 @@ async def get_matches_by_day(
 
 
 @mcp.tool()
-async def get_team_form(team: str, last_n: int = 10) -> MatchCollection:
-    """Recent results for match-preview context. team may be a Flashscore team URL or path such as /team/arsenal/hA1Zm19f/, or a team name. last_n is how many recent games to return. Pass a match_id from those games to get_match."""
-    return await team_ext.get_team_form(team, last_n)
+async def get_team_form(
+    team: str,
+    last_n: int = 10,
+    league: Optional[str] = None,
+    sport: str = "football",
+    league_only: bool = False,
+) -> MatchCollection:
+    """Recent results for match-preview context. team may be a Flashscore team URL or path such as /team/arsenal/hA1Zm19f/, or a team name. Optional league (a name such as 'MLS' or 'England: Premier League', or a path like /football/usa/mls/) matches the name among that league's teams first, so short forms such as 'LAFC' work; sport (default football) limits the search to that sport. notes say which team was used. All competitions are shown unless league_only=true. last_n is how many recent games to return. Pass a match_id from those games to get_match."""
+    return await team_ext.get_team_form(team, last_n, league, sport, league_only)
 
 
 async def _amain() -> None:
     logger.info("Starting Flashscore MCP Server v{}", __version__)
+    from .config import sizing_summary
+
+    logger.info(sizing_summary())
     await mcp.run_stdio_async()
 
 

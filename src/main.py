@@ -24,6 +24,9 @@ from flashscore_mcp.server import mcp  # the FastMCP object with all tools regis
 async def main() -> None:
     async with Actor:
         Actor.log.info("Starting Flashscore MCP Server on Apify (Standby-ready)")
+        from flashscore_mcp.config import sizing_summary
+
+        Actor.log.info(sizing_summary())
 
         actor_input = await Actor.get_input() or {}
         idle = actor_input.get("idleTimeoutSecs")

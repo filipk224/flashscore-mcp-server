@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlparse
 
 from ..models import League, LeagueInfo
+from ..seasons import LeagueSeasons
 from .archive import parse_archive
 
 _PRIMARY = ("Summary", "Odds", "News", "Results", "Fixtures", "Standings", "Archive")
@@ -38,14 +39,18 @@ def parse_league_page(html: str) -> LeagueInfo:
         if title in _PRIMARY and title not in tabs:
             tabs.append(title)
     name = " ".join(h1_m.group(1).split()) if h1_m else ""
+    season_text = season_m.group(1).strip() if season_m else None
+    archive = parse_archive(html)
+    season_format = LeagueSeasons(name, season_text, tuple(item.name for item in archive)).format
     return LeagueInfo(
         name=name,
         sport=_sport_slug(canon_m.group(1) if canon_m else None, sport_m.group(1) if sport_m else None),
         country=" ".join(country_m.group(1).split()) if country_m else None,
-        season=season_m.group(1).strip() if season_m else None,
+        season=season_text,
+        season_format=season_format,
         url=canon_m.group(1) if canon_m else None,
         tabs=tabs,
-        archive_seasons=parse_archive(html),
+        archive_seasons=archive,
     )
 
 

@@ -110,6 +110,9 @@ def main() -> None:
     )
     logger.info("MCP endpoint will be available at http://{}:{}/mcp", host, port)
     logger.info("HTTP authentication is enabled (bearer token).")
+    from .config import sizing_summary
+
+    logger.info(sizing_summary())
     logger.info(
         "Grok / remote clients: prefer HTTPS. If using plain HTTP IP, connection may be rejected by the client."
     )

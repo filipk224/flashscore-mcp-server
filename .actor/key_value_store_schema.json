@@ -1,0 +1,24 @@
+{
+  "actorKeyValueStoreSchemaVersion": 1,
+  "title": "Flashscore MCP Server key-value store",
+  "description": "The Actor reads its run input from the INPUT record and writes no other records. There is no OUTPUT record.",
+  "collections": {
+    "input": {
+      "title": "Run input",
+      "description": "Run input read at startup with Actor.get_input(). Only idleTimeoutSecs exists, and it is informational.",
+      "key": "INPUT",
+      "contentTypes": ["application/json"],
+      "jsonSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "idleTimeoutSecs": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400
+          }
+        }
+      }
+    }
+  }
+}

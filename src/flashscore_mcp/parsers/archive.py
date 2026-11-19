@@ -5,6 +5,7 @@ import json
 import re
 
 from ..models import Season
+from ..seasons import match_archive
 
 _MARKER = "league_archive_data = "
 
@@ -30,6 +31,13 @@ def _norm(s: str) -> str:
 
 def resolve_season(seasons: list[Season], season: str) -> tuple[str | None, list[str]]:
     names = [item.name for item in seasons]
+    # First the shared season labels: '2025/26', '2025-2026' and '2025' map to
+    # the archive entry in the league's own format ('... 2025/2026' or 'MLS 2025').
+    exact = match_archive(names, season)
+    if exact:
+        for item in seasons:
+            if item.name == exact:
+                return item.url, names
     wanted = season.strip().lower()
     wanted_norm = _norm(wanted)
     for item in seasons:

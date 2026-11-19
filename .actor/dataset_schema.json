@@ -1,0 +1,17 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "type": "object",
+    "description": "This Actor is a Standby MCP server and does not write dataset items. Sports data is returned from MCP tool calls at /mcp. The schema is intentionally open so any record is accepted if one is ever pushed.",
+    "properties": {},
+    "additionalProperties": true
+  },
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "description": "Empty by design: the Actor does not push dataset items.",
+      "transformation": {},
+      "display": { "component": "table" }
+    }
+  }
+}

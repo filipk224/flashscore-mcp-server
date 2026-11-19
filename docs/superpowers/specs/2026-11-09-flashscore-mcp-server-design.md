@@ -103,7 +103,7 @@ The process listens on `HOST` (default `0.0.0.0`) and `PORT` (default `8000`) so
 - `mcpEndpoint`: `{{run.containerUrl}}/mcp`
 - `health`: `{{run.containerUrl}}/health`
 
-Apify platform authentication is an Apify API token, not `FLASHSCORE_MCP_TOKEN`. The published Actor id is `SrutgzUV5rcOoni30`.
+Apify platform authentication is an Apify API token, not `FLASHSCORE_MCP_TOKEN`. The published Actor is `creator_224/flashscore-mcp-server`, Actor ID `KQFH7ycW2A38WpSWa`.
 
 `GET /health` returns JSON with `status`, `service`, `version`, `mcp_endpoint`, and `cache: false`.
 

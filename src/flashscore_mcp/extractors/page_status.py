@@ -5,12 +5,7 @@ import re
 
 from loguru import logger
 
-class LoadFailed(RuntimeError):
-    """The page did not load or could not be parsed; this is not an empty result."""
-
-    def __init__(self, message: str, reason: str = "parse-failed"):
-        super().__init__(message)
-        self.reason = reason
+from ..errors import LoadFailed  # noqa: F401  (re-exported; defined in errors.py)
 
 
 _EMPTY_HINTS = (
