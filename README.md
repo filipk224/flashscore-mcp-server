@@ -8,15 +8,19 @@ League tools accept the name with its country (Premier League (England) or NBA (
 Available tools:
 
     - list_sports():
-							List of available sports.
+		List of available sports.
 
-    - list_countries(sport):
-							List of countries with available leagues in a particular sport.
+  - list_countries(sport):
+		List of countries with available leagues in a particular sport.
 
-    - list_leagues(country, sport):
-							List of leagues in a particular country in a particular sport.
+  - list_leagues(country, sport):
+		List of leagues in a particular country in a particular sport.
 
-    - get_standings():
+  - get_standings(league, season, view):
+	 Standings of a particular leagues season with the coloumns played, wins, draws, losses, table points and form with a view of overall, home or away.
+					
+  - get_results_history(league, season, mode, limit, since):
+  Games results with dates, home/away team, home/away score, match_id, match_url and option for per period scores, live game status, limit game results to the newest N games or games since and including a certain date. 
 							
     get_results_history,
     get_upcoming_fixtures,
