@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import date, timedelta
+from flashscore_mcp.timeutil import today as utc_today
+from flashscore_mcp.extractors.listing import Listing, rows_from
 from unittest.mock import patch
 
 from flashscore_mcp.extractors import live, match as match_ext, team
@@ -244,7 +246,7 @@ class LiveAndDay(unittest.TestCase):
         asyncio.run(run())
 
     def test_day_offset_from_iso_date(self):
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        tomorrow = (utc_today() + timedelta(days=1)).isoformat()
         self.assertEqual(live.resolve_day_offset(None, tomorrow), 1)
         self.assertEqual(live.normalize_sport("Soccer"), "football")
 
@@ -265,13 +267,19 @@ class HeadToHeadAndForm(unittest.TestCase):
     def test_team_form_from_results_url(self):
         html = _pad("<html>flashscore " + MATCH_ROW + "</html>")
 
+        async def fake_listing(url, enough=None, **kwargs):
+            rows, count, from_feed = rows_from(html, [], "results")
+            return Listing(items=rows, html=html, all_count=count, complete=True, from_feed=from_feed)
+
         async def run() -> None:
-            with patch("flashscore_mcp.extractors.team.fetch_html", return_value=html) as mocked:
+            with patch("flashscore_mcp.extractors.results.fetch_listing", side_effect=fake_listing) as mocked:
                 result = await team.get_team_form("https://www.flashscore.com/team/arsenal/hA1Zm19f/", last_n=2)
             self.assertEqual(result.status, "ok")
             self.assertEqual(len(result.items), 2)
             mocked.assert_called()
             self.assertIn("/team/arsenal/hA1Zm19f/results/", mocked.call_args.args[0])
+            self.assertTrue(result.has_more)
+            self.assertEqual(result.next_offset, 2)
 
         asyncio.run(run())
 

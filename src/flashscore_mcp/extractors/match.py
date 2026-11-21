@@ -238,17 +238,30 @@ def _more_clicks(last_n: Optional[int], days_back: Optional[int]) -> int:
 
 
 async def _find_meeting(ref_a: TeamRef, ref_b: TeamRef) -> Optional[str]:
-    """Any game between the two teams, from team A's fixtures then results."""
-    for tab, until in (("fixtures", None), ("results", 80)):
+    """Any game between the two teams, from team A's fixtures then results.
+
+    The list is read from the page's feed and stops at the first meeting (or
+    after about 120 results), instead of always expanding 80 rendered rows.
+    """
+    from .listing import fetch_listing
+
+    def found(rows) -> bool:
+        return any(_involves(g, ref_b) and g.match_id for g in rows)
+
+    for tab, cap in (("fixtures", None), ("results", 120)):
         url = f"{ref_a.url}{tab}/"
+
+        def enough(rows, cap=cap) -> bool:
+            return found(rows) or cap is None or len(rows) >= cap
+
         try:
-            html = await fetch_html(url, full=until is not None, until_count=until)
+            listing = await fetch_listing(url, enough=enough)
         except BusyError:
             raise
         except LoadFailed as exc:
             logger.warning("h2h meeting search {} failed: {}", url, exc)
             continue
-        for game in parse_matches(html):
+        for game in listing.items:
             if _involves(game, ref_b) and game.match_id:
                 logger.info("h2h meeting for {} v {} -> {}", ref_a.path, ref_b.path, game.match_id)
                 return game.match_id
@@ -414,6 +427,38 @@ async def get_h2h(
     days_back: Optional[int] = None,
     season: Optional[str] = None,
     league: Optional[str] = None,
+    sport: Optional[str] = None,
+    league_only: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    from ..timeutil import zone_name
+    from .league_teams import infer_sport
+
+    zone_name(timezone)  # ValueError for an unknown zone, before any page loads
+    sport = infer_sport(league, sport)
+    result = await _get_h2h(match, team_a, team_b, last_n, days_back, season, league, sport, league_only)
+    return finish_collection(result, timezone)
+
+
+def finish_collection(result: MatchCollection, timezone: Optional[str] = None) -> MatchCollection:
+    """Normalised stage fields and labelled (optionally converted) times on every row."""
+    from ..parsers.stage import apply_stage
+    from ..timeutil import localize, zone_name
+
+    rows = [apply_stage(g) if isinstance(g, MatchResult) else g for g in result.items]
+    result.items = localize(rows, timezone) if all(isinstance(g, MatchResult) for g in rows) else rows
+    result.timezone = zone_name(timezone)
+    return result
+
+
+async def _get_h2h(
+    match: Optional[str] = None,
+    team_a: Optional[str] = None,
+    team_b: Optional[str] = None,
+    last_n: Optional[int] = None,
+    days_back: Optional[int] = None,
+    season: Optional[str] = None,
+    league: Optional[str] = None,
     sport: str = "football",
     league_only: bool = False,
 ) -> MatchCollection:
@@ -431,9 +476,9 @@ async def get_h2h(
             return await _season_h2h(team_a, team_b, season, last_n, days_back, league, sport, league_only)
         # season="all": the full history from a meeting page, under one budget.
         try:
-            return await asyncio.wait_for(
+            return await _bounded(
                 _full_history_h2h(team_a, team_b, clicks, last_n, days_back, league, sport, league_only),
-                timeout=settings.h2h_budget_s,
+                settings.h2h_budget_s,
             )
         except asyncio.TimeoutError:
             raise LoadFailed(
@@ -445,6 +490,22 @@ async def get_h2h(
     raise ValueError(
         "Pass a match URL/id, or both team_a and team_b, then optionally season, last_n or days_back."
     )
+
+
+async def _bounded(coro, timeout: float):
+    """Await ``coro`` for at most ``timeout`` seconds, then raise asyncio.TimeoutError.
+
+    Unlike asyncio.wait_for this does not wait for the cancelled work to wind
+    down: a page navigation that ignores cancellation (seen live: a match page
+    goto that ran on for minutes past the budget) cannot hold the reply.
+    """
+    task = asyncio.ensure_future(coro)
+    done, _pending = await asyncio.wait({task}, timeout=timeout)
+    if task in done:
+        return task.result()
+    task.cancel()
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    raise asyncio.TimeoutError()
 
 
 async def _full_history_h2h(

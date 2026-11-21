@@ -54,8 +54,11 @@ class PeriodScore(BaseModel):
 
 
 class MatchResult(BaseModel):
+    # date (DD.MM.YYYY, or DD.MM. when the page gives no year) and time are in
+    # the zone named by `timezone` (UTC unless the caller passed one).
     date: Optional[str] = None
     time: Optional[str] = None
+    # Raw round label from Flashscore, such as 'Round 7' or 'Quarter-finals'.
     round: Optional[str] = None
     home_team: str
     away_team: str
@@ -67,6 +70,39 @@ class MatchResult(BaseModel):
     minute: Optional[str] = None
     competition: Optional[str] = None
     extras: dict = Field(default_factory=dict)
+    # Kick-off as ISO 8601 UTC ('2025-09-05T00:20:00Z') when the page gives a timestamp.
+    kickoff_utc: Optional[str] = None
+    # Kick-off in the requested timezone with its offset, only when one was requested.
+    kickoff_local: Optional[str] = None
+    # Zone of date and time: 'UTC' or the requested IANA name.
+    timezone: Optional[str] = None
+    # Normalised from competition and round: regular_season, playoffs, all_star,
+    # preseason, qualification, relegation (None when unknown).
+    stage: Optional[str] = None
+    # 7 for 'Round 7' / 'Week 7'; None for knockout rounds.
+    round_number: Optional[int] = None
+    # Knockout round slug (round_of_16, quarter_final, semi_final, final, ...) and
+    # its name in that league (NFL: Wild Card, Divisional Round, Conference Championship, Super Bowl).
+    playoff_round: Optional[str] = None
+    playoff_round_name: Optional[str] = None
+
+
+class CompactMatch(BaseModel):
+    """One row per match for bulk reads (compact=true)."""
+
+    id: Optional[str] = None
+    kickoff_utc: Optional[str] = None
+    # Day (DD.MM.YYYY) in the response's timezone (UTC unless one was requested).
+    date: Optional[str] = None
+    round: Optional[str] = None
+    round_number: Optional[int] = None
+    stage: Optional[str] = None
+    playoff_round: Optional[str] = None
+    home: str
+    away: str
+    # 'home-away', such as '24-20'; None when not played.
+    score: Optional[str] = None
+    status: Optional[str] = None
 
 
 class OddsPrice(BaseModel):
@@ -138,9 +174,19 @@ class LineupPlayer(BaseModel):
 class MatchCollection(BaseModel):
     status: str = "ok"
     reason: Optional[str] = None
-    items: list[MatchResult] = Field(default_factory=list)
+    items: list[MatchResult | CompactMatch] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # Paging, filled in by list tools: rows matching the filters (total, None
+    # when the list was not read to its end), the first row returned (offset),
+    # and where the next page starts (next_offset, None on the last page).
+    total: Optional[int] = None
+    offset: Optional[int] = None
+    returned: Optional[int] = None
+    has_more: Optional[bool] = None
+    next_offset: Optional[int] = None
+    # Zone of every row's date and time.
+    timezone: Optional[str] = None
 
 
 class MatchDetail(BaseModel):
@@ -156,6 +202,8 @@ class MatchDetail(BaseModel):
     minute: Optional[str] = None
     date: Optional[str] = None
     time: Optional[str] = None
+    # Zone of date and time ('UTC': pages are read in UTC).
+    timezone: Optional[str] = None
     competition: Optional[str] = None
     summary: Optional[dict] = None
     stats: Optional[list[MatchStat]] = None

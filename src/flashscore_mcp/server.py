@@ -17,7 +17,6 @@ from .models import (
     MatchResult,
     MatchCollection,
     MatchDetail,
-    Fixture,
     NewsItem,
     Season,
     OddsPrice,
@@ -92,9 +91,18 @@ async def get_results_history(
     mode: str = "full",
     limit: Optional[int] = None,
     since: Optional[str] = None,
-) -> List[MatchResult]:
-    """Results with date, teams, status, match_id, match_url, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live. Omit limit and since for the whole tab. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id or match_url to get_match for stats, incidents, lineups, and head-to-head."""
-    return await results.get_results_history(league, season, mode, limit, since)
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    round: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    """Results with date, teams, status, match_id, match_url, and home_score/away_score. Period scores and notes are in extras. status is live when that game is live. season is 'current' or an archive season such as 'NFL 2025/2026' or '2025/26'. since is the same as date_from. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id or match_url to get_match for stats, incidents, lineups, and head-to-head. Paging: rows come newest first (fixtures oldest first) in pages kept under about 9 KB; the response has total (None while unknown), returned, has_more and next_offset, so pass offset=next_offset for the next page. limit caps the page size. compact=true returns one short row per game (id, kickoff_utc, date, round, round_number, stage, playoff_round, home, away, score, status), about four times as many per page. Filters: date_from/date_to (YYYY-MM-DD, inclusive, in timezone), round ('Round 5', '5', 'Week 5', 'Quarter-finals', 'wild_card'), stage (regular_season, playoffs, all_star, preseason). Times: date and time are UTC unless timezone (an IANA name such as 'America/New_York') is passed; kickoff_utc is ISO 8601 UTC and kickoff_local has the offset. Each row has the raw round label plus stage, round_number and playoff_round (round_of_16, quarter_final, semi_final, final; NFL names in playoff_round_name: Wild Card, Divisional Round, Conference Championship, Super Bowl). The round comes from each game's own row, so Thursday and Monday games stay in their round."""
+    return await results.get_results_history(
+        league, season, mode, limit, since, offset, date_from, date_to, round, stage, compact, timezone
+    )
 
 
 @mcp.tool()
@@ -102,9 +110,18 @@ async def get_upcoming_fixtures(
     league: str,
     limit: Optional[int] = None,
     since: Optional[str] = None,
-) -> List[Fixture]:
-    """Scheduled fixtures, each with match_id and match_url. Omit limit and since for every game. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id or match_url to get_match for preview details, or use get_h2h / get_team_form for pre-match context."""
-    return await fixtures.get_upcoming_fixtures(league, limit, since)
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    round: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    """Scheduled fixtures of the current season, each with match_id and match_url, oldest first. since is the same as date_from. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id or match_url to get_match for preview details, or use get_h2h / get_team_form for pre-match context. Paging: rows come newest first (fixtures oldest first) in pages kept under about 9 KB; the response has total (None while unknown), returned, has_more and next_offset, so pass offset=next_offset for the next page. limit caps the page size. compact=true returns one short row per game (id, kickoff_utc, date, round, round_number, stage, playoff_round, home, away, score, status), about four times as many per page. Filters: date_from/date_to (YYYY-MM-DD, inclusive, in timezone), round ('Round 5', '5', 'Week 5', 'Quarter-finals', 'wild_card'), stage (regular_season, playoffs, all_star, preseason). Times: date and time are UTC unless timezone (an IANA name such as 'America/New_York') is passed; kickoff_utc is ISO 8601 UTC and kickoff_local has the offset. Each row has the raw round label plus stage, round_number and playoff_round (round_of_16, quarter_final, semi_final, final; NFL names in playoff_round_name: Wild Card, Divisional Round, Conference Championship, Super Bowl). The round comes from each game's own row, so Thursday and Monday games stay in their round."""
+    return await fixtures.get_upcoming_fixtures(
+        league, limit, since, offset, date_from, date_to, round, stage, compact, timezone
+    )
 
 
 @mcp.tool()
@@ -143,22 +160,46 @@ async def get_historical_results(
     season: str,
     limit: Optional[int] = None,
     since: Optional[str] = None,
-) -> List[MatchResult]:
-    """Results for a named archive season, parsed with the same match row as the current season. Each result includes match_id and match_url. Omit limit and since for the whole season. limit is the newest N games. since is the oldest date to include. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id to get_match for detail."""
-    return await results.get_results_history(league, season, "full", limit, since)
-
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    round: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    """Results for a named archive season such as 'NFL 2025/2026', '2025/26' or 'MLS 2025' (see list_archive_seasons), parsed like the current season. Each result includes match_id and match_url. since is the same as date_from. league may be a name with its country, such as 'Premier League (England)' or 'NBA (USA)', or a path like football/england/premier-league. Pass match_id to get_match for detail. To read a whole season, page with compact=true until has_more is false. Paging: rows come newest first (fixtures oldest first) in pages kept under about 9 KB; the response has total (None while unknown), returned, has_more and next_offset, so pass offset=next_offset for the next page. limit caps the page size. compact=true returns one short row per game (id, kickoff_utc, date, round, round_number, stage, playoff_round, home, away, score, status), about four times as many per page. Filters: date_from/date_to (YYYY-MM-DD, inclusive, in timezone), round ('Round 5', '5', 'Week 5', 'Quarter-finals', 'wild_card'), stage (regular_season, playoffs, all_star, preseason). Times: date and time are UTC unless timezone (an IANA name such as 'America/New_York') is passed; kickoff_utc is ISO 8601 UTC and kickoff_local has the offset. Each row has the raw round label plus stage, round_number and playoff_round (round_of_16, quarter_final, semi_final, final; NFL names in playoff_round_name: Wild Card, Divisional Round, Conference Championship, Super Bowl). The round comes from each game's own row, so Thursday and Monday games stay in their round."""
+    return await results.get_results_history(
+        league, season, "full", limit, since, offset, date_from, date_to, round, stage, compact, timezone
+    )
 
 
 @mcp.tool()
 async def get_match(match: str, sections: Optional[List[str]] = None) -> MatchDetail:
-    """Match detail for a match_id or match_url from get_results_history, get_upcoming_fixtures, get_live_matches, or get_matches_by_day. Optional sections: summary, stats, incidents, lineups, h2h (all of them if omitted). Failed sections are reported in errors and the rest is still returned."""
-    return await match_ext.get_match(match, sections)
+    """Match detail for a match_id or match_url from get_results_history, get_upcoming_fixtures, get_live_matches, or get_matches_by_day. Optional sections: summary, stats, incidents, lineups, h2h (all of them if omitted). Failed sections are reported in errors and the rest is still returned. date and time are UTC (see timezone); h2h rows carry stage and round fields like the result lists."""
+    detail = await match_ext.get_match(match, sections)
+    if detail.date or detail.time:
+        detail.timezone = "UTC"
+    if detail.h2h:
+        from .parsers.stage import apply_stage
+
+        detail.h2h = [apply_stage(g).model_copy(update={"timezone": "UTC"}) for g in detail.h2h]
+    return detail
 
 
 @mcp.tool()
-async def get_live_matches(sport: str, country: Optional[str] = None, league: Optional[str] = None) -> MatchCollection:
-    """What's on right now: live games with score, minute, and status. sport is required, such as football. Optionally filter by country or a league name like 'NBA (USA)'. Then pass match_id to get_match for stats, incidents, lineups, or head-to-head."""
-    return await live_ext.get_live_matches(sport, country, league)
+async def get_live_matches(
+    sport: str,
+    country: Optional[str] = None,
+    league: Optional[str] = None,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    """What's on right now: live games with score, minute, and status. sport is required, such as football. Optionally filter by country or a league name like 'NBA (USA)'. Kick-off dates and times are UTC unless timezone (IANA name) is passed. Then pass match_id to get_match for stats, incidents, lineups, or head-to-head."""
+    from .timeutil import zone_name
+
+    zone_name(timezone)
+    result = await live_ext.get_live_matches(sport, country, league)
+    return match_ext.finish_collection(result, timezone)
 
 
 @mcp.tool()
@@ -170,12 +211,13 @@ async def get_h2h(
     days_back: Optional[int] = None,
     season: Optional[str] = None,
     league: Optional[str] = None,
-    sport: str = "football",
+    sport: Optional[str] = None,
     league_only: bool = False,
+    timezone: Optional[str] = None,
 ) -> MatchCollection:
-    """Head-to-head history. Pass a match_id or match_url (full history from that match's H2H tab), or both team_a and team_b. With team names the search is limited to one season, because two teams meet only a few times in a season. Optional league (a name such as 'MLS', 'Premier League' or 'England: Premier League', or a path like /football/england/premier-league/) is strongly recommended with team names: team names are matched among that league's teams first, so short forms work ('LAFC', 'LA Galaxy', 'Man Utd'), and the season follows that league's format. sport (default football) limits league and team search to that sport. Without league, teams come from Flashscore search within the sport and the season format is taken from team_a's main league. The season format is a calendar year such as '2025' for MLS, or a split year such as '2025/2026' for the Premier League. season defaults to the current one; pass '2025', '2025/26' or '2025-2026' (the same labels as the archive page); season='all' reads the full history instead (slower). If the format cannot be read, July to June is assumed. notes say which teams and league were used and how the season was decided. Meetings in all competitions are included; league_only=true keeps only that league's games. The search has a time budget and a page-load cap, so a result with status 'partial' and reason 'timeout' or 'load-cap' (see errors) may be missing meetings, while status 'empty' with reason 'no-meetings' means the teams did not meet in that season. last_n keeps the newest N meetings; days_back keeps meetings in that many days. You can also request h2h as a get_match section."""
+    """Head-to-head history. Pass a match_id or match_url (full history from that match's H2H tab), or both team_a and team_b. With team names the search is limited to one season, because two teams meet only a few times in a season. Optional league (a name such as 'MLS', 'Premier League' or 'England: Premier League', or a path like /football/england/premier-league/) is strongly recommended with team names: team names are matched among that league's teams first, so short forms work ('LAFC', 'LA Galaxy', 'Man Utd'), and the season follows that league's format. sport limits league and team search to that sport; it defaults to the league's sport (league='NFL' means american-football), else football. Without league, teams come from Flashscore search within the sport and the season format is taken from team_a's main league. The season format is a calendar year such as '2025' for MLS, or a split year such as '2025/2026' for the Premier League. season defaults to the current one; pass '2025', '2025/26' or '2025-2026' (the same labels as the archive page); season='all' reads the full history instead (slower). If the format cannot be read, July to June is assumed. notes say which teams and league were used and how the season was decided. Meetings in all competitions are included; league_only=true keeps only that league's games. The search has a time budget and a page-load cap, so a result with status 'partial' and reason 'timeout' or 'load-cap' (see errors) may be missing meetings, while status 'empty' with reason 'no-meetings' means the teams did not meet in that season. last_n keeps the newest N meetings; days_back keeps meetings in that many days. Dates and times are UTC unless timezone (IANA name) is passed; rows carry stage, round_number and playoff_round like the result lists. You can also request h2h as a get_match section."""
     return await match_ext.get_h2h(
-        match, team_a, team_b, last_n, days_back, season, league, sport, league_only
+        match, team_a, team_b, last_n, days_back, season, league, sport, league_only, timezone
     )
 
 
@@ -186,9 +228,13 @@ async def get_matches_by_day(
     date: Optional[str] = None,
     status: str = "all",
     league: Optional[str] = None,
+    timezone: Optional[str] = None,
+    offset: Optional[int] = None,
+    limit: Optional[int] = None,
+    compact: bool = False,
 ) -> MatchCollection:
-    """List a day's games for a sport without knowing the league first. day_offset is 0 for today, -1 for yesterday, 1 for tomorrow; date is YYYY-MM-DD. status is all, live, finished, or scheduled. Optionally filter by a league name like 'Premier League (England)'. Then pass match_id to get_match."""
-    return await live_ext.get_matches_by_day(sport, day_offset, date, status, league)
+    """List a day's games for a sport without knowing the league first. day_offset is 0 for today, -1 for yesterday, 1 for tomorrow; date is YYYY-MM-DD. The day is a UTC day unless timezone (an IANA name such as 'America/New_York') is passed; then the day, date and time are in that zone, so a US Monday night game stays on Monday. status is all, live, finished, or scheduled. Optionally filter by a league name like 'NFL' or 'Premier League (England)'. Dates more than 7 days from today need a league: that league's season results or fixtures are read for the day. Pages stay under about 9 KB: pass offset=next_offset while has_more is true, or compact=true for short rows. Then pass match_id to get_match."""
+    return await live_ext.get_matches_by_day(sport, day_offset, date, status, league, timezone, offset, limit, compact)
 
 
 @mcp.tool()
@@ -196,11 +242,20 @@ async def get_team_form(
     team: str,
     last_n: int = 10,
     league: Optional[str] = None,
-    sport: str = "football",
+    sport: Optional[str] = None,
     league_only: bool = False,
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    season: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
 ) -> MatchCollection:
-    """Recent results for match-preview context. team may be a Flashscore team URL or path such as /team/arsenal/hA1Zm19f/, or a team name. Optional league (a name such as 'MLS' or 'England: Premier League', or a path like /football/usa/mls/) matches the name among that league's teams first, so short forms such as 'LAFC' work; sport (default football) limits the search to that sport. notes say which team was used. All competitions are shown unless league_only=true. last_n is how many recent games to return. Pass a match_id from those games to get_match."""
-    return await team_ext.get_team_form(team, last_n, league, sport, league_only)
+    """Recent results for match-preview context, newest first. team may be a Flashscore team URL or path such as /team/arsenal/hA1Zm19f/, or a team name. Optional league (a name such as 'MLS' or 'England: Premier League', or a path like /football/usa/mls/) matches the name among that league's teams first, so short forms such as 'LAFC' work; sport limits the search to that sport; it defaults to the league's sport (league='NFL' means american-football), else football. notes say which team was used. All competitions are shown unless league_only=true. last_n is the page size (most recent games first). For older games page with offset=next_offset while has_more is true, or pick a range: season ('2025/26', '2025' - in the league's own format when league is given, else July to June) or date_from/date_to (YYYY-MM-DD), and stage (regular_season, playoffs, preseason, all_star). Pages stay under about 9 KB; compact=true gives short rows. Dates and times are UTC unless timezone (IANA name) is passed; kickoff_utc is ISO 8601 UTC. Pass a match_id from those games to get_match."""
+    return await team_ext.get_team_form(
+        team, last_n, league, sport, league_only, offset, date_from, date_to, season, stage, compact, timezone
+    )
 
 
 async def _amain() -> None:

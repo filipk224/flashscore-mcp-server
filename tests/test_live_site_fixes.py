@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+from flashscore_mcp.timeutil import today as utc_today
 from unittest.mock import patch
 
 from flashscore_mcp.extractors import live, match as match_ext
@@ -281,8 +283,11 @@ class GetMatchAndH2HTools(unittest.TestCase):
             return refs[name]
 
         async def fake_fetch(url, *args, **kwargs):
+            from flashscore_mcp.extractors.listing import Listing, rows_from
+
             self.assertIn("/team/arsenal/hA1Zm19f/", url)
-            return fixtures
+            rows, _count, _feed = rows_from(fixtures, [], "fixtures")
+            return Listing(items=rows, html=fixtures, complete=True)
 
         async def fake_load(url, sections, h2h_more=0, **kwargs):
             loaded.append(url)
@@ -290,7 +295,7 @@ class GetMatchAndH2HTools(unittest.TestCase):
 
         async def run():
             with patch("flashscore_mcp.extractors.match.resolve_team", side_effect=fake_resolve), \
-                 patch("flashscore_mcp.extractors.match.fetch_html", side_effect=fake_fetch), \
+                 patch("flashscore_mcp.extractors.listing.fetch_listing", side_effect=fake_fetch), \
                  patch("flashscore_mcp.extractors.match.load_match_page", side_effect=fake_load):
                 result = await match_ext.get_h2h(team_a="Arsenal", team_b="Chelsea", season="all")
             self.assertEqual(result.status, "ok")
@@ -404,7 +409,8 @@ class MatchRowStatuses(unittest.TestCase):
 
 
 def _ts(day: date, hh: int, mm: int = 0) -> int:
-    return int(datetime(day.year, day.month, day.day, hh, mm).timestamp())
+    # Feed timestamps are read as UTC (browser pages run in UTC too).
+    return int(datetime(day.year, day.month, day.day, hh, mm, tzinfo=timezone.utc).timestamp())
 
 
 def _feed(today: date) -> str:
@@ -424,7 +430,7 @@ def _feed(today: date) -> str:
 
 class DayFeed(unittest.TestCase):
     def test_feed_has_every_game_with_kickoff(self):
-        today = date.today()
+        today = utc_today()
         games = {g.match_id: g for g in parse_day_feed(_feed(today))}
         self.assertEqual(games["Hidden01"].date, today.strftime("%d.%m.%Y"))
         self.assertEqual(games["Hidden01"].time, "02:00")
@@ -435,15 +441,15 @@ class DayFeed(unittest.TestCase):
         self.assertEqual({g.match_id for g in only_pl}, {"Finish01", "Hidden01", "Yday0001"})
 
     def test_merge_keeps_rendered_detail(self):
-        merged = {g.match_id: g for g in merge_rows(parse_day_feed(_feed(date.today())), parse_matches(DAY_ROWS))}
+        merged = {g.match_id: g for g in merge_rows(parse_day_feed(_feed(utc_today())), parse_matches(DAY_ROWS))}
         self.assertEqual(merged["Finish01"].time, "00:30")
         self.assertTrue(merged["Finish01"].match_url.endswith("?mid=Finish01"))
         self.assertIn("LiveLive", merged)  # rendered-only rows survive
 
     def test_day_listing_uses_target_date_and_feed(self):
-        today = date.today()
+        today = utc_today()
 
-        async def fake_day(url, offset=0, live_tab=False):
+        async def fake_day(url, offset=0, live_tab=False, **kwargs):
             self.assertEqual(offset, -1)
             yday = today - timedelta(days=1)
             feed = "~".join([

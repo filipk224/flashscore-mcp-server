@@ -113,14 +113,20 @@ class BrowserManager:
             ) from None
 
     @asynccontextmanager
-    async def new_page(self, queue_wait_s: Optional[float] = None) -> AsyncIterator[Page]:
+    async def new_page(
+        self, queue_wait_s: Optional[float] = None, timezone_id: str = "UTC"
+    ) -> AsyncIterator[Page]:
         await self.start()
         await self._acquire_slot(queue_wait_s)
         try:
+            # Pages run in UTC (or the caller's zone for day listings), so the
+            # dates, times and day boundaries Flashscore renders do not depend
+            # on the host's local zone.
             context = await self._browser.new_context(
                 user_agent=settings.user_agent,
                 viewport={"width": 1280, "height": 800},
                 locale="en-US",
+                timezone_id=timezone_id or "UTC",
                 java_script_enabled=True,
             )
             try:

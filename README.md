@@ -8,15 +8,19 @@ League tools accept the name with its country (Premier League (England) or NBA (
 Available tools:
 
     - list_sports():
-							List of available sports.
+		List of available sports.
 
-    - list_countries(sport):
-							List of countries with available leagues in a particular sport.
+  - list_countries(sport):
+		List of countries with available leagues in a particular sport.
 
-    - list_leagues(country, sport):
-							List of leagues in a particular country in a particular sport.
+  - list_leagues(country, sport):
+		List of leagues in a particular country in a particular sport.
 
-    - get_standings():
+  - get_standings(league, season, view):
+	 Standings of a particular leagues season with the coloumns played, wins, draws, losses, table points and form with a view of overall, home or away.
+					
+  - get_results_history(league, season, mode, limit, since):
+  Games results with dates, home/away team, home/away score, match_id, match_url and option for per period scores, live game status, limit game results to the newest N games or games since and including a certain date. 
 							
     get_results_history,
     get_upcoming_fixtures,
@@ -31,6 +35,39 @@ Available tools:
     get_h2h,
     get_matches_by_day,
     get_team_form.
+
+## Paging, filters and time zones
+
+List tools (`get_results_history`, `get_historical_results`,
+`get_upcoming_fixtures`, `get_team_form`, `get_matches_by_day`) return one page
+of rows that fits the client gateway (about 9 KB of JSON by default):
+
+- `offset` / `limit` page through the list; each reply carries `total`,
+  `returned`, `has_more` and `next_offset`. Call again with
+  `offset=next_offset` until `has_more` is false. Pages read from the same
+  list are cached for a short time, so follow-up pages answer at once.
+- `compact=true` returns short rows (id, kickoff_utc, date, round, stage,
+  home, away, score, status), so more rows fit in one page.
+- Filters: `date_from` / `date_to` (YYYY-MM-DD), `round` ("Round 7", "7",
+  "Wild Card", "Super Bowl", "final") and `stage` (`regular_season`,
+  `playoffs`, `all_star`, `preseason`, ...). `get_team_form` also takes
+  `season` ("2025/26").
+- Every row keeps Flashscore's own `round` label and adds `stage`,
+  `round_number`, `playoff_round` and `playoff_round_name` (NFL: Wild Card,
+  Divisional Round, Conference Championship, Super Bowl). Rounds come from
+  each game's own feed record, so Thursday and Monday games stay in their week.
+- Times are UTC by default (`timezone` is "UTC" in each reply, and rows carry
+  `kickoff_utc`). Pass an IANA `timezone` such as `America/New_York` to get
+  `date`, `time` and `kickoff_local` in that zone; date filters and
+  `get_matches_by_day` days then follow that zone too.
+- `get_matches_by_day` with a `league` reads that league's season for dates
+  outside the day picker's range (for example a 2025 date).
+- `get_h2h` with `league` set and no `sport` infers the sport from the league
+  (`league="NFL"` uses american-football).
+
+Settings: `FLASHSCORE_PAGE_BYTES` (page size), `FLASHSCORE_LIST_BUDGET_S`
+(time to load a list), `FLASHSCORE_LIST_CACHE_S` and
+`FLASHSCORE_LIST_CACHE_ARCHIVE_S` (how long loaded lists are reused).
 
 ## Apify
 
