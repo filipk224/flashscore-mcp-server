@@ -191,15 +191,38 @@ async def _resolve_team_url(team: str) -> str:
     return f"{ref.url}results/"
 
 
+def _season_window(season: Optional[str], context) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """(date_from, date_to, note) for a season in the league's own format."""
+    if not season:
+        return None, None, None
+    from ..seasons import plan_season
+
+    plan = plan_season(season, context.seasons if context is not None else None)
+    note = " ".join(plan.notes) if plan.notes else f"Season {plan.label}: {plan.start:%Y-%m-%d} to {plan.end:%Y-%m-%d}."
+    return plan.start.isoformat(), plan.end.isoformat(), note
+
+
 async def get_team_form(
     team: str,
     last_n: int = 10,
     league: Optional[str] = None,
-    sport: str = "football",
+    sport: Optional[str] = None,
     league_only: bool = False,
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    season: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
 ) -> MatchCollection:
-    if last_n < 1:
+    if last_n is not None and last_n < 1:
         raise ValueError("last_n must be at least 1")
+    from .league_teams import infer_sport
+    from ..timeutil import zone_name
+
+    zone_name(timezone)  # ValueError for an unknown zone, before any page loads
+    sport = infer_sport(league, sport)
     notes: list[str] = []
     context = None
     if league:
@@ -211,38 +234,40 @@ async def get_team_form(
         raise ValueError("league_only needs a league.")
     ref, note = await resolve_team_noted(team, sport, context)
     notes.append(note)
+    if season and not (date_from or date_to):
+        date_from, date_to, season_note = _season_window(season, context)
+        if season_note:
+            notes.append(season_note)
     url = f"{ref.url}results/"
-    logger.info("get_team_form url={} last_n={}", url, last_n)
-    # Filtering to one competition may drop rows, so read further down the list.
-    html = await fetch_html(url, full=True, until_count=last_n * (3 if league_only else 1))
-    parsed = raw = parse_matches(html)
+    logger.info("get_team_form url={} last_n={} offset={} from={} to={}", url, last_n, offset, date_from, date_to)
+    row_filter = None
     if context is not None and league_only:
         from .league_teams import competition_matches
 
         if context.competition:
-            parsed = [g for g in parsed if competition_matches(g.competition, context)]
+            row_filter = lambda g: competition_matches(g.competition, context)  # noqa: E731
             notes.append(f"Only {context.competition} games (league_only).")
         else:
             notes.append("league_only ignored: the league's competition label could not be read; all competitions shown.")
     elif context is not None:
         notes.append("All competitions shown; pass league_only=true for league games only.")
-    items = parsed[:last_n]
-    if raw and not parsed:
-        return MatchCollection(
-            status="empty",
-            reason="no-league-games",
-            items=[],
-            errors=[f"None of the {len(raw)} recent games read were in {context.competition}."],
-            notes=notes,
-        )
-    if not parsed:
-        status, reason = page_outcome(
-            html, tab="team", parsed_count=0, raw_hints=count_match_hints(html)
-        )
-        if status == "failed":
-            raise LoadFailed(
-                f"Failed to load team form from {url}.",
-                reason=reason or "parse-failed",
-            )
-        return MatchCollection(status="empty", reason=reason or "no-matches-scheduled", items=[], notes=notes)
-    return MatchCollection(status="ok", items=items, notes=notes)
+    from .results import read_list
+
+    result = await read_list(
+        url,
+        "team",
+        offset=offset,
+        limit=last_n,
+        date_from=date_from,
+        date_to=date_to,
+        stage=stage,
+        compact=compact,
+        timezone=timezone,
+        newest_first=True,
+        row_filter=row_filter,
+        notes=notes,
+    )
+    if result.status == "empty" and row_filter is not None and context is not None:
+        result.reason = "no-league-games"
+        result.errors.append(f"None of the recent games read were in {context.competition}.")
+    return result

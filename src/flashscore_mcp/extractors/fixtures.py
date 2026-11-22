@@ -1,47 +1,51 @@
-"""Upcoming fixtures from the shared match-row parser."""
+"""Upcoming fixtures, read like results (see listing.py) and kept to scheduled games."""
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 from loguru import logger
 
-from ..models import Fixture
-from ..parsers.adapter import count_match_hints
-from ..parsers.matches import parse_matches
-from .fetch import fetch_html
-from .page_status import empty_or_raise
+from ..models import MatchCollection
 from .resolve import resolve_league_ref
-from .results import _league_url
-from .window import take_until
+from .results import _league_url, read_list
 
 
 async def get_upcoming_fixtures(
     league: str,
     limit: Optional[int] = None,
     since: Optional[str] = None,
-) -> List[Fixture]:
+    offset: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    round: Optional[str] = None,
+    stage: Optional[str] = None,
+    compact: bool = False,
+    timezone: Optional[str] = None,
+) -> MatchCollection:
+    if since and not date_from:
+        from ..timeutil import parse_day
+
+        try:
+            parse_day(since)
+        except ValueError as exc:
+            raise ValueError("since must be a full date such as 2026-09-10 (or use date_from).") from exc
+        date_from = since
     league = await resolve_league_ref(league)
     url = _league_url(league, "current", "fixtures")
-    logger.info("get_upcoming_fixtures url={} limit={} since={}", url, limit, since)
-    # Scheduled rows are only known after parsing, so a raw row count would
-    # stop short of the caller's fixture count. Load the tab, then cut.
-    html = await fetch_html(url, full=True)
-    parsed = parse_matches(html)
-    games = [game for game in parsed if game.status == "scheduled"]
-    fixtures = [
-        Fixture(
-            date=game.date,
-            time=game.time,
-            round=game.round,
-            home_team=game.home_team,
-            away_team=game.away_team,
-            url=game.match_url,
-            match_id=game.match_id,
-            match_url=game.match_url,
-        )
-        for game in take_until(games, limit=limit, since=since)
-    ]
-    if not parsed:
-        empty_or_raise(html, "fixtures", fixtures, raw_hints=count_match_hints(html))
-    logger.info("Returning {} fixtures", len(fixtures))
-    return fixtures
+    logger.info("get_upcoming_fixtures url={} offset={} limit={} since={}", url, offset, limit, since)
+    # Fixtures run oldest first, so date_from/since only skip early rows and
+    # date_to is where loading can stop.
+    return await read_list(
+        url,
+        "fixtures",
+        offset=offset,
+        limit=limit,
+        date_from=date_from,
+        date_to=date_to,
+        round=round,
+        stage=stage,
+        compact=compact,
+        timezone=timezone,
+        newest_first=False,
+        keep_status="scheduled",
+    )

@@ -60,3 +60,32 @@ async def get_json(url: str, timeout: float = 8.0) -> Any:
         return json.loads(text)
     except ValueError:
         return None
+
+
+def _get_feed(url: str, sign: str, timeout: float) -> tuple[int, str]:
+    import urllib.error
+
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": settings.user_agent,
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": settings.base_url.rstrip("/") + "/",
+            "x-fsign": sign,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - Flashscore feed host
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, ""
+
+
+async def get_feed(url: str, sign: str, timeout: float = 10.0) -> tuple[int, str]:
+    """(status, body) of a Flashscore x/feed URL, with the page's feed signature header."""
+    try:
+        return await asyncio.to_thread(_get_feed, url, sign, timeout)
+    except Exception as exc:
+        logger.debug("feed GET failed {}: {}", url, exc)
+        return 0, ""

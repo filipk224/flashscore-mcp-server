@@ -73,7 +73,7 @@ async def _day_label(page) -> Optional[str]:
         return None
 
 
-async def fetch_day(url: str, offset: int = 0, live_tab: bool = False) -> DayPage:
+async def fetch_day(url: str, offset: int = 0, live_tab: bool = False, timezone_id: str = "UTC") -> DayPage:
     """Open a sport page, step the day picker to offset, and keep that day's feed.
 
     The ?d= query the old code used is ignored by Flashscore, so yesterday's
@@ -94,7 +94,8 @@ async def fetch_day(url: str, offset: int = 0, live_tab: bool = False) -> DayPag
             logger.debug("day feed body unavailable: {}", exc)
 
     try:
-        async with browser_manager.new_page() as page:
+        # The page's zone sets where Flashscore's day starts and ends.
+        async with browser_manager.new_page(timezone_id=timezone_id) as page:
             page.on("response", lambda r: pending.append(asyncio.ensure_future(grab(r))))
             await safe_goto(page, url)
             try:
